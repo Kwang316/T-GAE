@@ -95,7 +95,7 @@ def main(args):
     else:
         output_feature_size = 8
     lr = 0.001
-    epoch = 400
+    epoch = 100
     print("Loading training datasets")
 
     train_loader = {}
