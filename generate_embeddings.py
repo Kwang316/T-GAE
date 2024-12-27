@@ -3,8 +3,7 @@ import os
 import torch
 import numpy as np
 from scipy.sparse import coo_matrix
-import networkx as nx
-from netrd.distance import netsimile
+from tqdm import tqdm
 
 data_path = '/content/drive/My Drive/Neuro/'
 
@@ -19,7 +18,7 @@ def load_graph_from_csv(csv_path, node_mapping=None):
 
     num_nodes = len(node_mapping)
     adj_matrix = torch.zeros((num_nodes, num_nodes), dtype=torch.float)
-    for _, row in data.iterrows():
+    for _, row in tqdm(data.iterrows(), desc="Building adjacency matrix", total=len(data)):
         adj_matrix[row['From Node ID'], row['To Node Id']] = row['Weight']
 
     return adj_matrix, node_mapping
@@ -42,15 +41,15 @@ def save_tensors(adj_matrix, features, output_path):
 def main():
     male_csv_path = os.path.join(data_path, "male_connectome_graph.csv")
     female_csv_path = os.path.join(data_path, "female_connectome_graph.csv")
-    male_csv = pd.read_csv(male_csv_path)
-    female_csv = pd.read_csv(female_csv_path)
 
-    male_adj, node_mapping = load_graph_from_csv(male_csv)
+    print("Processing male graph...")
+    male_adj, node_mapping = load_graph_from_csv(male_csv_path)
     male_features = generate_features(male_adj)
     male_adj_norm = preprocess_graph(male_adj)
     save_tensors(male_adj_norm, male_features, "male_embeddings.pt")
 
-    female_adj, _ = load_graph_from_csv(female_csv, node_mapping=node_mapping)
+    print("Processing female graph...")
+    female_adj, _ = load_graph_from_csv(female_csv_path, node_mapping=node_mapping)
     female_features = generate_features(female_adj)
     female_adj_norm = preprocess_graph(female_adj)
     save_tensors(female_adj_norm, female_features, "female_embeddings.pt")
