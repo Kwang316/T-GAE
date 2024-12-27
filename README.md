@@ -1,4 +1,4 @@
-# T-GAE: Transferable Graph Autoencoder for Network Alignment
+# Copy of T-GAE: Transferable Graph Autoencoder for Network Alignment (Personal Adapation)
 
 This repository contains code for the paper T-GAE: Transferable Graph Autoencoder for Network Alignment. The paper is accepted by Proceedings of the Third Learning on Graphs Conference (LoG 2024)
 
