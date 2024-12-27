@@ -37,8 +37,10 @@ def save_tensors(adj_matrix, features, output_path):
     torch.save({'adj_matrix': adj_matrix, 'features': features}, output_path)
 
 def main():
-    male_csv = "male_data.csv"
-    female_csv = "female_data.csv"
+    male_csv_path = os.path.join(data_path, "male_connectome_graph.csv")
+    female_csv_path = os.path.join(data_path, "female_connectome_graph.csv"
+    male_csv = pd.read_csv(male_csv_path)
+    female_csv = pd.read_csv(female_csv_path)
 
     male_adj, node_mapping = load_graph_from_csv(male_csv)
     male_features = generate_features(male_adj)
