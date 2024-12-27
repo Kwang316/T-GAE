@@ -72,7 +72,20 @@ def fit_TGAE(no_samples, TGAE, epoch, train_loader, train_features, device, lr, 
         # Save final embeddings and permutation matrix after training
         if step == epoch - 1:
             final_S_emb = TGAE(S_feat.to(device), adj_norm_S).detach()
-            
+        # After training TGAE
+        final_S_emb = TGAE(S_feat.to(device), adj_norm_S).detach()
+        target_S_emb = TGAE(S_hat_features.to(device), adj_norm_S).detach()
+        
+        # Compute pairwise similarities (e.g., cosine similarity)
+        similarities = torch.matmul(final_S_emb, target_S_emb.T)  # [N x M], where N and M are node counts
+        mapping = torch.argmax(similarities, dim=1)  # Map each node in one graph to a node in the other
+        
+        # Save the mapping
+        mapped_pairs = [(i.item(), mapping[i].item()) for i in range(len(mapping))]
+        with open("node_mapping.txt", "w") as f:
+            for source, target in mapped_pairs:
+                f.write(f"{source} -> {target}\n")
+
         S_emb = TGAE(S_feat.to(device), adj_norm_S).detach()
         # Save outputs at the end of training
         torch.save(final_S_emb, "final_node_embeddings.pt")
@@ -87,8 +100,48 @@ def fit_TGAE(no_samples, TGAE, epoch, train_loader, train_features, device, lr, 
         else:
             print("Epoch:", '%04d' % (step + 1), "train_loss= {0:.5f}".format(loss.item()))
 
+def compute_mapping(TGAE, dataset, device):
+    # Load adjacency and features for the target dataset
+    S_eval = load_adj(dataset)
+    adj_S = coo_matrix(S_eval.numpy())
+    adj_norm_S = preprocess_graph(adj_S)
+    adj_norm_S = torch.sparse.FloatTensor(
+        torch.LongTensor(adj_norm_S[0].T),
+        torch.FloatTensor(adj_norm_S[1]),
+        torch.Size(adj_norm_S[2])
+    ).to(device)
+    S_feat = generate_features([S_eval])[0]
+
+    # Generate embeddings using the pretrained model
+    S_emb = TGAE(S_feat.to(device), adj_norm_S).detach()
+
+    # Simulated perturbed embeddings (or other target graph embeddings)
+    S_hat_samples, _, _ = gen_test_set(device, load_adj(dataset), 10, [0], method="uniform")
+    S_hat_features = generate_features(S_hat_samples["0"])
+    target_S_emb = TGAE(S_hat_features.to(device), adj_norm_S).detach()
+
+    # Compute pairwise similarities
+    similarities = torch.matmul(S_emb, target_S_emb.T)
+    mapping = torch.argmax(similarities, dim=1)  # Map each node to the closest counterpart
+
+    # Save the mapping to a file
+    mapping_file = f"{dataset}_node_mapping.txt"
+    with open(mapping_file, "w") as f:
+        for i, j in enumerate(mapping):
+            f.write(f"{i} -> {j.item()}\n")
+    print(f"Node mapping saved to {mapping_file}")
+
 def main(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else "cpu")
+    if args.mapping_only:
+        # Load the pretrained model
+        assert args.load_model is not None, "Specify a model checkpoint with --load_model for mapping-only mode."
+        model = TGAE(NUM_HIDDEN_LAYERS, 7, HIDDEN_DIM, output_feature_size).to(device)
+        model.load_state_dict(torch.load(args.load_model))
+        model.eval()
+        print("Loaded pretrained model. Computing mapping...")
+        compute_mapping(model, args.dataset, device)
+        return  # Exit after mapping-only process
     train_set = ["celegans","arenas","douban","cora"]
     test_set = [args.dataset]
     probability_model = args.model
@@ -135,6 +188,8 @@ def parse_args():
     parser.add_argument('--level', type=int, default=0, help='Choose from {0,0.01,0.05}')
     parser.add_argument('--algorithm', type=str, default="greedy", help = 'Choose from {greedy, exact, approxNN}')
     parser.add_argument('--eval_interval', type=int, default="5", help = 'evaluation interval')
+    parser.add_argument('--mapping_only', action='store_true', help='Compute mapping only after training')
+    parser.add_argument('--load_model', type=str, default=None, help='Path to a trained T-GAE model checkpoint')
     return parser.parse_args()
 
 
