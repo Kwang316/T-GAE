@@ -38,7 +38,7 @@ def save_tensors(adj_matrix, features, output_path):
 
 def main():
     male_csv_path = os.path.join(data_path, "male_connectome_graph.csv")
-    female_csv_path = os.path.join(data_path, "female_connectome_graph.csv"
+    female_csv_path = os.path.join(data_path, "female_connectome_graph.csv")
     male_csv = pd.read_csv(male_csv_path)
     female_csv = pd.read_csv(female_csv_path)
 
