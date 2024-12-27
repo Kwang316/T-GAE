@@ -6,6 +6,8 @@ from scipy.sparse import coo_matrix
 import networkx as nx
 from netrd.distance import netsimile
 
+data_path = '/content/drive/My Drive/Neuro/'
+
 def load_graph_from_csv(csv_path, node_mapping=None):
     data = pd.read_csv(csv_path)
     if node_mapping is None:
