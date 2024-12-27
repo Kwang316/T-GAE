@@ -68,8 +68,14 @@ def fit_TGAE(no_samples, TGAE, epoch, train_loader, train_features, device, lr, 
         loss = loss / no_samples
         loss.backward()
         optimizer.step()
-
+        
+        # Save final embeddings and permutation matrix after training
+        if step == epoch - 1:
+            final_S_emb = TGAE(S_feat.to(device), adj_norm_S).detach()
+            
         S_emb = TGAE(S_feat.to(device), adj_norm_S).detach()
+        # Save outputs at the end of training
+        torch.save(final_S_emb, "final_node_embeddings.pt")
         if(step % eval_interval == 0):
             print("Epoch:", '%04d' % (step + 1), "train_loss= {0:.5f}".format(loss.item()), end = " ")
             avg, std = test_matching(TGAE, S_hat_samples[str(level_eval)], p_samples[str(level_eval)], S_hat_features, S_emb, device, algorithm,
