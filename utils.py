@@ -6,6 +6,17 @@ from scipy.sparse import coo_matrix
 import networkx as nx
 from netrd.distance import netsimile
 
+def load_adj(dataset):
+    if dataset.endswith('.pt'):
+        data = torch.load(dataset)
+        return data['adj_matrix'], None  # Return adjacency matrix and None for node mapping
+    elif dataset == "celegans":
+        S = torch.load("data/celegans.pt")
+    elif dataset == "arenas":
+        S = torch.load("data/arenas.pt")
+    else:
+        raise ValueError(f"Unsupported dataset: {dataset}")
+
 def preprocess_graph(adj):
     adj = coo_matrix(adj)
     adj_ = adj + np.eye(adj.shape[0])
