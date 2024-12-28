@@ -1,5 +1,5 @@
 import torch
-from scipy.sparse import coo_matrix, csr_matrix
+from scipy.sparse import coo_matrix
 import numpy as np
 from tqdm import tqdm
 
@@ -18,6 +18,7 @@ def preprocess_graph(adj):
     """
     Preprocess adjacency matrix for use in TGAE.
     """
+    print("Preprocessing graph...")
     adj = coo_matrix(adj.cpu().numpy())
     adj_ = adj + np.eye(adj.shape[0])
     rowsum = np.array(adj_.sum(1))
@@ -30,6 +31,6 @@ def save_mapping(mapping, output_file):
     Save the computed node mapping to a file.
     """
     with open(output_file, "w") as f:
-        for i, j in enumerate(mapping):
+        for i, j in tqdm(enumerate(mapping), desc="Saving node mapping", total=len(mapping)):
             f.write(f"{i} -> {j.item()}\n")
     print(f"Node mapping saved to {output_file}")
