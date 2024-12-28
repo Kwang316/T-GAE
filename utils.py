@@ -16,39 +16,35 @@ def load_adj(filepath):
 
 def preprocess_graph(adj):
     """
-    Preprocess adjacency matrix for use in TGAE.
+    Normalize the adjacency matrix.
     """
-    print("Preprocessing graph...")
-
-    # Convert to SciPy sparse matrix (if not already)
-    adj = coo_matrix(adj.cpu().numpy())
-
+    # Convert PyTorch tensor to numpy if needed
+    if torch.is_tensor(adj):
+        adj = adj.cpu().numpy()
+    elif isinstance(adj, (coo_matrix, csr_matrix)):
+        adj = adj.toarray()
+    elif not isinstance(adj, np.ndarray):
+        adj = np.array(adj)
+        
     # Add self-loops
-    adj_ = adj + coo_matrix(np.eye(adj.shape[0]))
-    rowsum = np.array(adj_.sum(1)).flatten()
-
-    # Calculate D^(-1/2) (degree matrix inverse square root)
-    degree_mat_inv_sqrt = coo_matrix(np.diag(np.power(rowsum, -0.5)))
-
-    # Normalize adjacency matrix: A_norm = D^(-1/2) * A * D^(-1/2)
-    with tqdm(total=3, desc="Preprocessing steps") as pbar:
-        adj_normalized = degree_mat_inv_sqrt @ adj_ @ degree_mat_inv_sqrt  # Step 1: Normalize
-        pbar.update(1)
-
-        # Convert normalized adjacency matrix to sparse tensor
-        adj_normalized = torch.sparse_coo_tensor(
-            np.vstack((adj_normalized.row, adj_normalized.col)),
-            adj_normalized.data,
-            torch.Size(adj_normalized.shape),
-            dtype=torch.float
-        )
-        pbar.update(1)  # Step 2 completed
-
-        # Coalesce (ensure well-formed sparse tensor)
-        adj_normalized = adj_normalized.coalesce()
-        pbar.update(1)  # Step 3 completed
-
-    return adj_normalized
+    adj_ = adj + np.eye(adj.shape[0])
+    
+    # Calculate degree matrix
+    rowsum = np.array(adj_.sum(1))
+    degree_mat_inv_sqrt = np.power(rowsum, -0.5).flatten()
+    degree_mat_inv_sqrt[np.isinf(degree_mat_inv_sqrt)] = 0.
+    degree_mat_inv_sqrt = np.diag(degree_mat_inv_sqrt)
+    
+    # Normalize adjacency matrix
+    adj_normalized = adj_.dot(degree_mat_inv_sqrt).transpose().dot(degree_mat_inv_sqrt)
+    
+    # Convert to sparse tensor
+    sparse_adj = coo_matrix(adj_normalized)
+    indices = torch.from_numpy(np.vstack((sparse_adj.row, sparse_adj.col))).long()
+    values = torch.from_numpy(sparse_adj.data).float()
+    shape = torch.Size(sparse_adj.shape)
+    
+    return torch.sparse_coo_tensor(indices, values, shape)
 
 def save_mapping(mapping, output_file):
     """
