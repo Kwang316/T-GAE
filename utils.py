@@ -1,32 +1,35 @@
 import torch
-from scipy.sparse import coo_matrix
+from scipy.sparse import coo_matrix, csr_matrix
 import numpy as np
+from tqdm import tqdm
 
-def load_adj(dataset):
+def load_adj(filepath):
     """
-    Load the adjacency matrix from the dataset.
+    Load adjacency matrix from a .pt file.
     """
-    if dataset.endswith('.pt'):
-        print(f"Loading adjacency matrix from {dataset}...")
-        data = torch.load(dataset, weights_only=False)  # Explicitly set weights_only
-        if 'adj_matrix' in data:
-            return data['adj_matrix'], None
-        else:
-            raise ValueError("The .pt file must contain an 'adj_matrix' key.")
-    elif dataset == "celegans":
-        S = torch.load("data/celegans.pt")
-    elif dataset == "arenas":
-        S = torch.load("data/arenas.pt")
-    else:
-        raise ValueError(f"Unsupported dataset: {dataset}")
+    print(f"Loading adjacency matrix from {filepath}...")
+    data = torch.load(filepath)
+    if not isinstance(data, dict) or 'adj_matrix' not in data:
+        raise ValueError(f"Unsupported file format or missing 'adj_matrix' key in {filepath}.")
+    adj_matrix = data['adj_matrix']
+    return adj_matrix, data.get('node_mapping', None)
 
 def preprocess_graph(adj):
     """
-    Normalize the adjacency matrix.
+    Preprocess adjacency matrix for use in TGAE.
     """
-    adj = coo_matrix(adj)
+    adj = coo_matrix(adj.cpu().numpy())
     adj_ = adj + np.eye(adj.shape[0])
     rowsum = np.array(adj_.sum(1))
     degree_mat_inv_sqrt = np.diag(np.power(rowsum, -0.5).flatten())
     adj_normalized = adj_.dot(degree_mat_inv_sqrt).transpose().dot(degree_mat_inv_sqrt)
     return torch.tensor(adj_normalized, dtype=torch.float)
+
+def save_mapping(mapping, output_file):
+    """
+    Save the computed node mapping to a file.
+    """
+    with open(output_file, "w") as f:
+        for i, j in enumerate(mapping):
+            f.write(f"{i} -> {j.item()}\n")
+    print(f"Node mapping saved to {output_file}")
