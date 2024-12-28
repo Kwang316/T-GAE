@@ -93,6 +93,7 @@ def main(args):
             num_hidden_layers=args.num_hidden_layers
         ).to(device)
         model.load_state_dict(torch.load(args.load_model))
+        model.load_state_dict(torch.load("/content/drive/My Drive/Neuro/TGAE/tgae_model.pt"))
         model.eval()
 
         adj1, _ = load_adj(args.dataset1)
