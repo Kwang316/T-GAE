@@ -61,7 +61,7 @@ def main(args):
 
     if args.mapping_only:
         print("Loading trained model...")
-        model = TGAE(input_dim=1, hidden_dim=16, output_dim=8, num_hidden_layers=8).to(device)
+        model = TGAE(input_dim=1, hidden_dim=[16] * 8, output_dim=8, num_hidden_layers=8).to(device)
         model.load_state_dict(torch.load(args.load_model))
         model.eval()
         print("Loaded trained model. Computing mapping...")
