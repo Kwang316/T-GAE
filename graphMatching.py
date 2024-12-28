@@ -14,7 +14,7 @@ class TGAE_Encoder(nn.Module):
         if len(hidden_dim) != num_hidden_layers + 1:
             raise ValueError(f"hidden_dim list length ({len(hidden_dim)}) must be num_hidden_layers + 1 ({num_hidden_layers + 1})")
 
-        for i in range(num_hidden_layers):
+        for i in tqdm(range(num_hidden_layers), desc="Initializing GIN layers"):
             self.convs.append(
                 GINConv(
                     nn.Sequential(
