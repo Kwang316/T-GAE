@@ -1,3 +1,7 @@
+import torch
+from scipy.sparse import coo_matrix
+import numpy as np
+
 def load_adj(dataset):
     """
     Load the adjacency matrix from the dataset.
@@ -15,3 +19,14 @@ def load_adj(dataset):
         S = torch.load("data/arenas.pt")
     else:
         raise ValueError(f"Unsupported dataset: {dataset}")
+
+def preprocess_graph(adj):
+    """
+    Normalize the adjacency matrix.
+    """
+    adj = coo_matrix(adj)
+    adj_ = adj + np.eye(adj.shape[0])
+    rowsum = np.array(adj_.sum(1))
+    degree_mat_inv_sqrt = np.diag(np.power(rowsum, -0.5).flatten())
+    adj_normalized = adj_.dot(degree_mat_inv_sqrt).transpose().dot(degree_mat_inv_sqrt)
+    return torch.tensor(adj_normalized, dtype=torch.float)
