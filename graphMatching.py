@@ -30,16 +30,34 @@ def fit_TGAE(TGAE, adj, features, device, lr, epochs):
 def main(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    print("Loading datasets...")
-    adj, node_mapping = load_graph_from_csv(args.dataset1)
-    features = generate_features(adj)
+    if args.mapping_only:
+        print("Loading trained model...")
+        model = TGAE(input_dim=1, hidden_dim=16, output_dim=8).to(device)
+        model.load_state_dict(torch.load(args.load_model))
+        model.eval()
+        print("Loaded trained model. Computing mapping...")
+        adj1, _ = load_adj(args.dataset1)
+        adj2, _ = load_adj(args.dataset2)
 
-    model = TGAE(input_dim=1, hidden_dims=[16] * 8, output_dim=8).to(device)
-    print("Starting training...")
-    model = fit_TGAE(model, adj, features, device, args.lr, args.epochs)
+        # Compute embeddings and node mapping
+        embeddings1 = model(adj1)
+        embeddings2 = model(adj2)
+        mapping = compute_mapping(embeddings1, embeddings2)
+        save_mapping(mapping, "node_mapping.txt")
+        print("Node mapping saved to node_mapping.txt")
+    else:
+        print("Loading dataset...")
+        adj, node_mapping = load_adj(args.dataset1)
+        features = generate_features(adj)
 
-    torch.save(model.state_dict(), "tgae_model.pt")
-    print("Model training complete and saved.")
+        print("Training model...")
+        model = TGAE(input_dim=features.size(1), hidden_dim=16, output_dim=8).to(device)
+        model = train_TGAE(model, adj, features, device, args.lr, args.epochs)
+
+        print("Saving trained model...")
+        torch.save(model.state_dict(), "tgae_model.pt")
+        print("Model saved as tgae_model.pt")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="TGAE Training")
