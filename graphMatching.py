@@ -1,28 +1,62 @@
-from utils import load_adj, preprocess_graph
 import torch
-from torch.optim import Adam
-from model import TGAE
+from utils import load_adj, preprocess_graph, save_mapping
+from torch_geometric.nn import GINConv
+import torch.nn as nn
 import argparse
 
+class TGAE_Encoder(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim, num_hidden_layers):
+        super(TGAE_Encoder, self).__init__()
+        self.in_proj = nn.Linear(input_dim, hidden_dim[0])
+        self.convs = nn.ModuleList()
+
+        if len(hidden_dim) != num_hidden_layers + 1:
+            raise ValueError(f"hidden_dim list length ({len(hidden_dim)}) must be num_hidden_layers + 1 ({num_hidden_layers + 1})")
+
+        for i in range(num_hidden_layers):
+            self.convs.append(
+                GINConv(
+                    nn.Sequential(
+                        nn.Linear(hidden_dim[i], hidden_dim[i+1]),
+                        nn.ReLU(),
+                        nn.Linear(hidden_dim[i+1], hidden_dim[i+1])
+                    )
+                )
+            )
+        total_hidden_dim = sum(hidden_dim)
+        self.out_proj = nn.Linear(total_hidden_dim, output_dim)
+
+    def forward(self, x, adj):
+        x = self.in_proj(x)
+        hidden_states = [x]
+
+        for conv in self.convs:
+            x = conv(x, adj)
+            hidden_states.append(x)
+
+        x = torch.cat(hidden_states, dim=1)
+        x = self.out_proj(x)
+        return x
+
+class TGAE(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim, num_hidden_layers):
+        super(TGAE, self).__init__()
+        self.encoder = TGAE_Encoder(input_dim, hidden_dim, output_dim, num_hidden_layers)
+
+    def forward(self, x, adj):
+        return self.encoder(x, adj)
+
 def fit_TGAE(model, adj, features, device, lr, epochs):
-    """
-    Train the TGAE model.
-    """
-    adj_norm = preprocess_graph(adj.numpy())
-    adj_norm_tensor = torch.sparse.FloatTensor(
-        torch.LongTensor(adj_norm[0].T),
-        torch.FloatTensor(adj_norm[1]),
-        torch.Size(adj_norm[2])
-    ).to(device)
-    optimizer = Adam(model.parameters(), lr=lr, weight_decay=5e-4)
+    adj_norm = preprocess_graph(adj).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=5e-4)
     features = features.to(device)
 
     for epoch in range(epochs):
         model.train()
         optimizer.zero_grad()
-        embeddings = model(features, adj_norm_tensor)
+        embeddings = model(features, adj_norm)
         reconstructed = torch.sigmoid(torch.matmul(embeddings, embeddings.T))
-        loss = torch.nn.BCELoss()(reconstructed, adj.to(device))
+        loss = nn.BCELoss()(reconstructed, adj.to(device))
         loss.backward()
         optimizer.step()
         print(f"Epoch {epoch + 1}/{epochs}, Loss: {loss.item()}")
@@ -30,57 +64,50 @@ def fit_TGAE(model, adj, features, device, lr, epochs):
     return model
 
 def compute_mapping(model, adj1, adj2, device):
-    """
-    Compute node mappings between two graphs.
-    """
-    adj1 = preprocess_graph(adj1.numpy()).to(device)
-    adj2 = preprocess_graph(adj2.numpy()).to(device)
+    adj1 = preprocess_graph(adj1).to(device)
+    adj2 = preprocess_graph(adj2).to(device)
     features1 = torch.ones((adj1.shape[0], 1), device=device)
     features2 = torch.ones((adj2.shape[0], 1), device=device)
 
     embeddings1 = model(features1, adj1)
     embeddings2 = model(features2, adj2)
-
-    # Compute pairwise similarities
     similarities = torch.matmul(embeddings1, embeddings2.T)
-    mapping = torch.argmax(similarities, dim=1)  # Find the best match for each node
-
-    return mapping
-
-def save_mapping(mapping, output_file):
-    """
-    Save the computed node mapping to a file.
-    """
-    with open(output_file, "w") as f:
-        for i, j in enumerate(mapping):
-            f.write(f"{i} -> {j.item()}\n")
-    print(f"Node mapping saved to {output_file}")
+    return torch.argmax(similarities, dim=1)
 
 def main(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     if args.mapping_only:
         print("Loading trained model...")
-        model = TGAE(input_dim=1, hidden_dim=[16] * 8, output_dim=8, num_hidden_layers=8).to(device)
+        hidden_dim = [16] * (args.num_hidden_layers + 1)
+        model = TGAE(
+            input_dim=1,
+            hidden_dim=hidden_dim,
+            output_dim=8,
+            num_hidden_layers=args.num_hidden_layers
+        ).to(device)
         model.load_state_dict(torch.load(args.load_model))
         model.eval()
-        print("Loaded trained model. Computing mapping...")
 
         adj1, _ = load_adj(args.dataset1)
         adj2, _ = load_adj(args.dataset2)
-
         mapping = compute_mapping(model, adj1, adj2, device)
         save_mapping(mapping, "node_mapping.txt")
     else:
         print("Loading dataset...")
         adj, _ = load_adj(args.dataset1)
-        features = torch.ones((adj.shape[0], 1))  # Generate dummy features (e.g., ones)
+        features = torch.ones((adj.shape[0], 1))
 
         print("Training model...")
-        model = TGAE(input_dim=1, hidden_dim=16, output_dim=8, num_hidden_layers=8).to(device)
-        model = fit_TGAE(model, adj, features, device, args.lr, args.epochs)
+        hidden_dim = [16] * (args.num_hidden_layers + 1)
+        model = TGAE(
+            input_dim=1,
+            hidden_dim=hidden_dim,
+            output_dim=8,
+            num_hidden_layers=args.num_hidden_layers
+        ).to(device)
 
-        print("Saving trained model...")
+        model = fit_TGAE(model, adj, features, device, args.lr, args.epochs)
         torch.save(model.state_dict(), "tgae_model.pt")
         print("Model saved as tgae_model.pt")
 
@@ -92,5 +119,6 @@ if __name__ == "__main__":
     parser.add_argument('--epochs', type=int, default=100, help='Number of training epochs')
     parser.add_argument('--mapping_only', action='store_true', help='Perform mapping only')
     parser.add_argument('--load_model', type=str, default=None, help='Path to a trained model checkpoint')
+    parser.add_argument('--num_hidden_layers', type=int, default=8, help='Number of hidden layers')
     args = parser.parse_args()
     main(args)
