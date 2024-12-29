@@ -8,6 +8,7 @@ def fit_TGAE(model, adj, features, device, lr, epochs):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     model.to(device)
     adj = adj.float().to(device)  # Ensure adjacency matrix is in the correct format
+    adj = adj / adj.max()  # Normalize adjacency matrix to [0, 1]
     features = features.to(device)
 
     for epoch in range(epochs):
@@ -16,21 +17,19 @@ def fit_TGAE(model, adj, features, device, lr, epochs):
 
         # Forward pass
         reconstructed = model(features, adj)
-        reconstructed = torch.sigmoid(reconstructed)  # Ensure values are in [0, 1]
+        loss = nn.BCELoss()(reconstructed, adj)  # Alternatively, use BCEWithLogitsLoss
 
         # Debugging outputs
-        print(f"Reconstructed min: {reconstructed.min()}, max: {reconstructed.max()}")
-        print(f"Adjacency matrix min: {adj.min()}, max: {adj.max()}")
-
-        # Compute loss
-        loss = nn.BCELoss()(reconstructed, adj)
         print(f"Epoch {epoch}, Loss: {loss.item()}")
+        print(f"Adjacency matrix min: {adj.min()}, max: {adj.max()}")
+        print(f"Reconstructed min: {reconstructed.min()}, max: {reconstructed.max()}")
 
         # Backward pass and optimization
         loss.backward()
         optimizer.step()
 
     return model
+
 
 
 def main(args):
