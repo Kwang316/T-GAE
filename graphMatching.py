@@ -56,19 +56,51 @@ def map_datasets(model, adj1, adj2, features1, features2, device, algorithm):
 
 def main(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
     if args.mode == "train":
+        print("Training mode activated...")
+        # Load adjacency matrix
         adj = load_adj(args.dataset1)
+        print("Adjacency matrix loaded.")
+
+        # Generate perturbations
         features = generate_purturbations(device, adj, args.level, 10, args.model)
+        print("Perturbations generated.")
+
+        # Initialize model
         model = TGAE(args.hidden_layers, args.input_dim, args.hidden_dim, args.output_dim).to(device)
+        print("Model initialized.")
+
+        # Train the model
         fit_TGAE(model, [adj], [features], device, args.lr, args.epochs, args.level, args.eval_interval)
+        print("Model training completed.")
+
+        # Save the trained model
         torch.save(model.state_dict(), args.save_model)
         print(f"Model saved to {args.save_model}")
+
     elif args.mode == "map":
-        adj1, adj2 = load_adj(args.dataset1), load_adj(args.dataset2)
-        features1, features2 = generate_features(adj1), generate_features(adj2)
+        print("Mapping mode activated...")
+        # Load adjacency matrices
+        adj1 = load_adj(args.dataset1)
+        adj2 = load_adj(args.dataset2)
+        print("Adjacency matrices loaded.")
+
+        # Generate features
+        features1 = generate_features(adj1)
+        features2 = generate_features(adj2)
+        print("Features generated.")
+
+        # Load the pre-trained model
         model = TGAE(args.hidden_layers, args.input_dim, args.hidden_dim, args.output_dim).to(device)
         model.load_state_dict(torch.load(args.load_model))
+        print("Model loaded.")
+
+        # Perform mapping
         mapping = map_datasets(model, adj1, adj2, features1, features2, device, args.algorithm)
+        print("Mapping completed.")
+
+        # Save the mapping
         with open(args.save_mapping, 'w') as f:
             f.write('\n'.join([f"{src}->{tgt}" for src, tgt in mapping]))
         print(f"Mapping saved to {args.save_mapping}")
@@ -92,4 +124,6 @@ if __name__ == "__main__":
     parser.add_argument('--level', type=float, default=0.0, help="Perturbation level for generating data")
     parser.add_argument('--model', type=str, default="uniform", choices=["uniform", "degree"], help="Perturbation model")
     parser.add_argument('--algorithm', type=str, default="greedy", choices=["greedy", "exact"], help="Matching algorithm")
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    main(args)
