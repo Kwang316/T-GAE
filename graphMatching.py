@@ -1,26 +1,17 @@
-from algorithm import *
-from model import *
-from utils import *  # Ensure all utility functions, including generate_purturbations, are imported
+from utils import load_adj, generate_purturbations, test_matching
+from model import TGAE
 import torch
 import argparse
-import warnings
+import os
 from torch.optim import Adam
+from tqdm import tqdm
 
-warnings.filterwarnings("ignore")
 
-
-def fit_TGAE(
-    model,
-    adj,
-    features,
-    device,
-    lr,
-    epochs,
-    save_model_path,
-):
+def fit_TGAE(model, adj, features, device, lr, epochs, save_path=None):
     optimizer = Adam(model.parameters(), lr=lr)
     model.to(device)
-    adj = adj.to(device)
+
+    adj = adj.float().to(device)
     features = features.to(device)
 
     for epoch in range(epochs):
@@ -28,119 +19,76 @@ def fit_TGAE(
         optimizer.zero_grad()
 
         # Forward pass
-        embeddings = model(features, adj)
-        reconstruction = torch.sigmoid(torch.matmul(embeddings, embeddings.T))
-        loss = torch.nn.BCELoss()(reconstruction, adj)
+        z = model(features, adj)
+        A_pred = torch.sigmoid(torch.matmul(z, z.T))
 
-        # Backward pass and optimization
+        # Compute loss
+        pos_weight = (adj.shape[0] * adj.shape[0] - adj.sum()) / adj.sum()
+        weight_tensor = torch.ones_like(adj)
+        weight_tensor[adj == 1] = pos_weight
+        loss = torch.nn.BCELoss(weight=weight_tensor)(A_pred.view(-1), adj.view(-1))
+
+        # Backward pass
         loss.backward()
         optimizer.step()
 
         print(f"Epoch {epoch + 1}/{epochs}, Loss: {loss.item()}")
 
-    if save_model_path:
-        torch.save(model.state_dict(), save_model_path)
-        print(f"Model saved to {save_model_path}")
+    if save_path:
+        torch.save(model.state_dict(), save_path)
+        print(f"Model saved to {save_path}")
+
+    return model
 
 
-def map_nodes(
-    model, dataset1_adj, dataset1_features, dataset2_adj, dataset2_features, device, save_mapping_path
-):
-    model.to(device)
+def map_embeddings(model, dataset1, dataset2, device, algorithm="greedy"):
+    adj1 = load_adj(dataset1).to(device)
+    adj2 = load_adj(dataset2).to(device)
+    features1 = torch.eye(adj1.shape[0]).to(device)
+    features2 = torch.eye(adj2.shape[0]).to(device)
+
     model.eval()
+    z1 = model(features1, adj1).detach()
+    z2 = model(features2, adj2).detach()
 
-    dataset1_adj = dataset1_adj.to(device)
-    dataset1_features = dataset1_features.to(device)
-    dataset2_adj = dataset2_adj.to(device)
-    dataset2_features = dataset2_features.to(device)
-
-    # Generate embeddings for both datasets
-    emb1 = model(dataset1_features, dataset1_adj)
-    emb2 = model(dataset2_features, dataset2_adj)
-
-    # Compute pairwise distances
-    distances = torch.cdist(emb1, emb2, p=2)
-
-    # Compute node mapping using Hungarian algorithm
-    from scipy.optimize import linear_sum_assignment
-
-    row_ind, col_ind = linear_sum_assignment(distances.cpu().detach().numpy())
-    mapping = {int(row): int(col) for row, col in zip(row_ind, col_ind)}
-
-    if save_mapping_path:
-        torch.save(mapping, save_mapping_path)
-        print(f"Node mapping saved to {save_mapping_path}")
-
-    return mapping
+    D = torch.cdist(z1, z2, p=2)
+    mapping = test_matching(model, [adj1], [D], [features1], z2, device, algorithm, "accuracy")
+    print(f"Mapping results: {mapping}")
 
 
 def main(args):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     if args.mode == "train":
-        print("Loading dataset...")
         adj = load_adj(args.dataset1)
-        features = load_features(args.dataset1)
+        features = torch.eye(adj.shape[0])  # Identity matrix as features
 
         input_dim = features.shape[1]
-        hidden_dim = [16] * 8  # 8 hidden layers
-        output_dim = 16  # Output feature size
+        hidden_dim = [16] * args.num_hidden_layers
+        output_dim = 16
 
         model = TGAE(len(hidden_dim), input_dim, hidden_dim, output_dim)
-
-        print("Training model...")
-        fit_TGAE(
-            model,
-            adj,
-            features,
-            device,
-            args.lr,
-            args.epochs,
-            args.save_model,
-        )
+        fit_TGAE(model, adj, features, device, args.lr, args.epochs, save_path=args.save_model)
 
     elif args.mode == "map":
-        if not args.dataset2 or not args.load_model:
-            raise ValueError("Mapping mode requires --dataset2 and --load_model")
-
-        print("Loading datasets...")
-        dataset1_adj = load_adj(args.dataset1)
-        dataset1_features = load_features(args.dataset1)
-        dataset2_adj = load_adj(args.dataset2)
-        dataset2_features = load_features(args.dataset2)
-
-        print("Loading model...")
-        input_dim = dataset1_features.shape[1]
-        hidden_dim = [16] * 8
-        output_dim = 16
-        model = TGAE(len(hidden_dim), input_dim, hidden_dim, output_dim)
+        model = TGAE(args.num_hidden_layers, 16, [16] * args.num_hidden_layers, 16)
         model.load_state_dict(torch.load(args.load_model))
+        model.to(device)
 
-        print("Mapping nodes...")
-        map_nodes(
-            model,
-            dataset1_adj,
-            dataset1_features,
-            dataset2_adj,
-            dataset2_features,
-            device,
-            args.save_mapping,
-        )
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="Run T-GAE for graph matching task")
-    parser.add_argument("--mode", type=str, choices=["train", "map"], required=True, help="Mode: train or map")
-    parser.add_argument("--dataset1", type=str, required=True, help="Path to the first dataset")
-    parser.add_argument("--dataset2", type=str, help="Path to the second dataset for mapping")
-    parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
-    parser.add_argument("--epochs", type=int, default=10, help="Number of epochs for training")
-    parser.add_argument("--save_model", type=str, help="Path to save the trained model")
-    parser.add_argument("--load_model", type=str, help="Path to load the trained model")
-    parser.add_argument("--save_mapping", type=str, help="Path to save the node mapping")
-    return parser.parse_args()
+        map_embeddings(model, args.dataset1, args.dataset2, device, args.algorithm)
 
 
 if __name__ == "__main__":
-    args = parse_args()
+    parser = argparse.ArgumentParser(description="Run T-GAE for graph matching task")
+    parser.add_argument("--mode", choices=["train", "map"], required=True, help="Mode: train or map")
+    parser.add_argument("--dataset1", type=str, required=True, help="Path to the first dataset")
+    parser.add_argument("--dataset2", type=str, required=False, help="Path to the second dataset (required for mapping)")
+    parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
+    parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
+    parser.add_argument("--save_model", type=str, help="Path to save the trained model")
+    parser.add_argument("--load_model", type=str, help="Path to load the trained model")
+    parser.add_argument("--num_hidden_layers", type=int, default=3, help="Number of hidden layers")
+    parser.add_argument("--algorithm", choices=["greedy", "exact", "approxNN"], default="greedy", help="Matching algorithm")
+
+    args = parser.parse_args()
     main(args)
