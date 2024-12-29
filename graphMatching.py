@@ -1,10 +1,19 @@
 from algorithm import *
 from model import *
+from utils import *  # Ensure all utility functions, including generate_purturbations, are imported
 import torch
 import numpy as np
+import scipy.sparse as sp
+from scipy.sparse import csr_matrix
+import pickle
+from netrd.distance import netsimile
+import networkx as nx
+import os.path as osp
 from scipy.sparse import coo_matrix
+from tqdm import tqdm
+import random
 import warnings
-from utils import *
+from torch.optim import Adam
 import argparse
 
 warnings.filterwarnings("ignore")
@@ -102,40 +111,68 @@ def map_nodes(TGAE, dataset1, dataset2, device, algorithm, metric):
     np.save("node_mapping.npy", mapping.cpu().numpy())
     print("Mapping saved as node_mapping.npy")
 
-
 def main(args):
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    if args.mode == "train":
-        train_set = [args.dataset1]
-        train_loader = {dataset: generate_purturbations(device, load_adj(dataset), args.level, 10, args.model)
-                        for dataset in train_set}
-        train_features = {dataset: generate_features(train_loader[dataset]) for dataset in train_loader.keys()}
-        model = TGAE(8, 7, [16] * 8, 8).to(device)
-        print("Training model...")
-        model = fit_TGAE(11, model, args.epochs, train_loader, train_features, device, args.lr, args.level, args.dataset1,
-                         args.model, args.algorithm, args.eval_interval)
-        torch.save(model.state_dict(), "tgae_model.pth")
-        print("Model saved as tgae_model.pth")
+    device = torch.device('cuda:0' if torch.cuda.is_available() else "cpu")
+    train_set = ["celegans", "arenas", "douban", "cora"]
+    test_set = [args.dataset1]
+    probability_model = args.model
+    training_perturbation_level = args.level
+    no_training_samples_per_graph = 10
+    NUM_HIDDEN_LAYERS = 8
+    HIDDEN_DIM = [16, 16, 16, 16, 16, 16, 16, 16, 16]
+    output_feature_size = 1 if args.algorithm == "approxNN" else 8
+    lr = args.lr
+    epoch = args.epochs
 
-    elif args.mode == "map":
-        model = TGAE(8, 7, [16] * 8, 8).to(device)
-        model.load_state_dict(torch.load(args.load_model, map_location=device))
-        print("Mapping nodes...")
-        map_nodes(model, args.dataset1, args.dataset2, device, args.algorithm, metric="accuracy")
+    print("Loading training datasets")
+
+    train_loader = {
+        dataset: generate_purturbations(
+            device, load_adj(dataset), training_perturbation_level, no_training_samples_per_graph, probability_model
+        )
+        for dataset in train_set
+    }
+
+    model = TGAE(NUM_HIDDEN_LAYERS, 7, HIDDEN_DIM, output_feature_size).to(device)
+
+    print("Generating training features")
+    train_features = {
+        dataset: generate_features(train_loader[dataset]) for dataset in train_loader.keys()
+    }
+
+    print("Fitting T-GAE")
+    fit_TGAE(
+        len(train_set) * (no_training_samples_per_graph + 1),
+        model,
+        epoch,
+        train_loader,
+        train_features,
+        device,
+        lr,
+        args.level,
+        args.dataset1,
+        args.model,
+        args.algorithm,
+        args.eval_interval,
+    )
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run T-GAE for graph matching")
-    parser.add_argument('--mode', type=str, required=True, choices=["train", "map"], help="Mode: train or map")
-    parser.add_argument('--dataset1', type=str, required=True, help="Path to the first dataset")
-    parser.add_argument('--dataset2', type=str, help="Path to the second dataset (required for mapping)")
-    parser.add_argument('--load_model', type=str, help="Path to the saved model (required for mapping)")
-    parser.add_argument('--lr', type=float, default=0.001, help="Learning rate")
-    parser.add_argument('--epochs', type=int, default=400, help="Number of training epochs")
-    parser.add_argument('--level', type=float, default=0.0, help="Perturbation level")
-    parser.add_argument('--model', type=str, default="uniform", choices=["uniform", "degree"], help="Perturbation model")
-    parser.add_argument('--algorithm', type=str, default="greedy", choices=["greedy", "exact"], help="Matching algorithm")
-    parser.add_argument('--eval_interval', type=int, default=5, help="Evaluation interval during training")
+    parser = argparse.ArgumentParser(description="Run T-GAE for graph matching task")
+    parser.add_argument(
+        "--mode", type=str, choices=["train", "map"], required=True, help="Choose between train or map mode"
+    )
+    parser.add_argument("--dataset1", type=str, required=True, help="Path to the first dataset")
+    parser.add_argument("--dataset2", type=str, help="Path to the second dataset for mapping (required in map mode)")
+    parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
+    parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
+    parser.add_argument("--level", type=float, default=0.0, help="Perturbation level for training datasets")
+    parser.add_argument("--model", type=str, default="uniform", help="Probability model (uniform or degree)")
+    parser.add_argument("--algorithm", type=str, default="greedy", help="Matching algorithm")
+    parser.add_argument("--eval_interval", type=int, default=5, help="Evaluation interval")
+    parser.add_argument("--save_model", type=str, help="Path to save the trained model")
+    parser.add_argument("--load_model", type=str, help="Path to load the trained model (for mapping)")
+    parser.add_argument("--save_mapping", type=str, help="Path to save the node mapping (for mapping)")
     return parser.parse_args()
 
 
