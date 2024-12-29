@@ -1,85 +1,63 @@
-from model import TGAE  # Import your TGAE model
-from utils import load_adj, load_features
-import torch
-import torch.nn as nn
-import argparse
-import os
-
-def save_model(model, path):
+def map_graphs(model, dataset1, dataset2, device, save_mapping_path=None):
     """
-    Save the model state to the specified path.
+    Map two graphs using the trained model.
 
     Args:
-        model (torch.nn.Module): The model to save.
-        path (str): The file path to save the model.
+        model (TGAE): The trained TGAE model.
+        dataset1 (str): Path to the first dataset.
+        dataset2 (str): Path to the second dataset.
+        device (torch.device): Device for computation.
+        save_mapping_path (str): Path to save the mapping results (optional).
+
+    Returns:
+        None
     """
-    os.makedirs(os.path.dirname(path), exist_ok=True)  # Ensure the directory exists
-    torch.save(model.state_dict(), path)
-    print(f"Model saved at {path}")
+    print("Loading datasets for mapping...")
+    adj1 = load_adj(dataset1).to(device)
+    adj2 = load_adj(dataset2).to(device)
 
-def fit_TGAE(model, adj, features, device, lr, epochs, save_path=None):
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    model.to(device)
+    features1 = load_features(dataset1).to(device)
+    features2 = load_features(dataset2).to(device)
 
-    # Normalize adjacency matrix
-    adj = adj.float().to(device)
-    adj = adj / adj.max()  # Ensure values are in [0, 1]
-    features = features.to(device)
+    model.eval()
+    with torch.no_grad():
+        # Generate embeddings
+        embedding1 = model.encoder(features1, adj1)
+        embedding2 = model.encoder(features2, adj2)
 
-    for epoch in range(epochs):
-        model.train()
-        optimizer.zero_grad()
+        # Compute pairwise similarity (e.g., cosine similarity)
+        similarity_matrix = torch.mm(embedding1, embedding2.T)
+        mapping = torch.argmax(similarity_matrix, dim=1)
 
-        # Forward pass
-        reconstructed = model(features, adj)
-        loss = nn.BCEWithLogitsLoss()(reconstructed, adj)
+        print("Mapping completed.")
+        print(f"Mapping result: {mapping.cpu().numpy()}")
 
-        # Debugging outputs
-        print(f"Epoch {epoch}, Loss: {loss.item()}")
-        print(f"Adjacency min: {adj.min().item()}, max: {adj.max().item()}")
-        print(f"Reconstructed min: {reconstructed.min().item()}, max: {reconstructed.max().item()}")
-
-        # Backward pass and optimization
-        loss.backward()
-        optimizer.step()
-
-    # Save the model if a save path is provided
-    if save_path:
-        save_model(model, save_path)
-
-    return model
+        if save_mapping_path:
+            torch.save(mapping.cpu(), save_mapping_path)
+            print(f"Mapping saved to {save_mapping_path}")
 
 
 def main(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-    print("Loading dataset...")
-    adj = load_adj(args.dataset1)  # Load adjacency matrix
-    features = load_features(args.dataset1)  # Load features
+    print("Loading model...")
+    model = TGAE(input_dim=0, hidden_dim=16, output_dim=0, num_hidden_layers=3)  # Adjust as necessary
+    model.load_state_dict(torch.load(args.load_model, map_location=device))
+    model.to(device)
+    print("Model loaded successfully.")
 
-    # Update dimensions based on dataset
-    input_dim = features.shape[1]
-    hidden_dim = 16
-    output_dim = adj.shape[0]
-    num_hidden_layers = 3  # Set the number of hidden layers (adjust as needed)
+    if args.mapping_only:
+        print("Running mapping only...")
+        map_graphs(
+            model=model,
+            dataset1=args.dataset1,
+            dataset2=args.dataset2,
+            device=device,
+            save_mapping_path=args.save_mapping
+        )
+        return
 
-    # Initialize model
-    model = TGAE(
-        input_dim=input_dim,
-        hidden_dim=hidden_dim,
-        output_dim=output_dim,
-        num_hidden_layers=num_hidden_layers
-    )
-
-    if args.load_model:
-        print(f"Loading pre-trained model from {args.load_model}")
-        model.load_state_dict(torch.load(args.load_model, map_location=device))
-        print("Model loaded successfully.")
-
-    print("Training model...")
-    model = fit_TGAE(model, adj, features, device, args.lr, args.epochs, args.save_model)
-
-    print("Training completed.")
+    print("Training is disabled for --mapping_only mode.")
 
 
 if __name__ == "__main__":
@@ -89,8 +67,8 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=0.001, help="Learning rate for training")
     parser.add_argument('--epochs', type=int, default=10, help="Number of training epochs")
     parser.add_argument('--mapping_only', action='store_true', help="Run in mapping-only mode")
-    parser.add_argument('--load_model', type=str, help="Path to the pre-trained model to load")
-    parser.add_argument('--save_model', type=str, help="Path to save the final trained model")
+    parser.add_argument('--load_model', type=str, required=True, help="Path to the pre-trained model to load")
+    parser.add_argument('--save_mapping', type=str, help="Path to save the mapping result")
 
     args = parser.parse_args()
     main(args)
