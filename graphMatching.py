@@ -2,7 +2,6 @@ import torch
 from utils import load_adj, preprocess_graph, save_mapping
 from torch_geometric.nn import GINConv
 import torch.nn as nn
-from tqdm import tqdm
 import argparse
 
 class TGAE_Encoder(nn.Module):
@@ -14,7 +13,7 @@ class TGAE_Encoder(nn.Module):
         if len(hidden_dim) != num_hidden_layers + 1:
             raise ValueError(f"hidden_dim list length ({len(hidden_dim)}) must be num_hidden_layers + 1 ({num_hidden_layers + 1})")
 
-        for i in tqdm(range(num_hidden_layers), desc="Initializing GIN layers"):
+        for i in range(num_hidden_layers):
             self.convs.append(
                 GINConv(
                     nn.Sequential(
@@ -31,7 +30,7 @@ class TGAE_Encoder(nn.Module):
         x = self.in_proj(x)
         hidden_states = [x]
 
-        for conv in tqdm(self.convs, desc="Processing GIN layers", total=len(self.convs)):
+        for conv in self.convs:
             x = conv(x, adj)
             hidden_states.append(x)
 
@@ -52,7 +51,7 @@ def fit_TGAE(model, adj, features, device, lr, epochs):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=5e-4)
     features = features.to(device)
 
-    for epoch in tqdm(range(epochs), desc="Training TGAE"):
+    for epoch in range(epochs):
         model.train()
         optimizer.zero_grad()
         embeddings = model(features, adj_norm)
@@ -70,14 +69,9 @@ def compute_mapping(model, adj1, adj2, device):
     features1 = torch.ones((adj1.shape[0], 1), device=device)
     features2 = torch.ones((adj2.shape[0], 1), device=device)
 
-    print("Computing embeddings for Graph 1...")
     embeddings1 = model(features1, adj1)
-    print("Computing embeddings for Graph 2...")
     embeddings2 = model(features2, adj2)
-
-    print("Computing pairwise similarities...")
     similarities = torch.matmul(embeddings1, embeddings2.T)
-
     return torch.argmax(similarities, dim=1)
 
 def main(args):
@@ -97,7 +91,6 @@ def main(args):
 
         adj1, _ = load_adj(args.dataset1)
         adj2, _ = load_adj(args.dataset2)
-        print("Computing node mapping...")
         mapping = compute_mapping(model, adj1, adj2, device)
         save_mapping(mapping, "node_mapping.txt")
     else:
@@ -116,7 +109,6 @@ def main(args):
 
         model = fit_TGAE(model, adj, features, device, args.lr, args.epochs)
         torch.save(model.state_dict(), "tgae_model.pt")
-        torch.save(model.state_dict(), "/content/drive/My Drive/Neuro/TGAE/tgae_model.pt")
         print("Model saved as tgae_model.pt")
 
 if __name__ == "__main__":
