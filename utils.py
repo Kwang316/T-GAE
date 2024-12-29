@@ -1,47 +1,47 @@
 import torch
 import numpy as np
 from scipy.sparse import coo_matrix
-from netrd.distance import netsimile
-import networkx as nx
-
+import random
 
 def load_adj(dataset_path):
     return torch.load(dataset_path)
 
+def generate_purturbations(device, adj, perturbation_level, no_samples, method="uniform"):
+    perturbed_samples = []
+    num_edges = int(torch.count_nonzero(adj).item() / 2)
+    total_perturbations = int(perturbation_level * num_edges)
 
-def test_matching(TGAE, S_hat_samples, p_samples, S_hat_features, S_emb, device, algorithm, metric):
-    results = []
-    for i in range(len(S_hat_samples)):
-        S_hat_cur = S_hat_samples[i]
-        adj_norm = preprocess_graph(coo_matrix(S_hat_cur.numpy()))
-        adj_norm = torch.sparse.FloatTensor(
-            torch.LongTensor(adj_norm[0].T), torch.FloatTensor(adj_norm[1]), torch.Size(adj_norm[2])
-        ).to(device)
+    if method == "uniform":
+        for _ in range(no_samples):
+            add_edge = random.randint(0, total_perturbations)
+            delete_edge = total_perturbations - add_edge
+            perturbed_samples.append(gen_dataset(adj, add_edge, delete_edge))
+    else:
+        raise NotImplementedError("Only uniform perturbations are supported.")
 
-        initial_feature = S_hat_features[i].to(device)
-        z = TGAE(initial_feature, adj_norm).detach()
-        D = torch.cdist(S_emb, z, p=2)
+    return perturbed_samples
 
-        if algorithm == "greedy":
-            P_HG = greedy_hungarian(D, device)
-        else:
-            raise NotImplementedError("Only greedy matching is currently supported.")
+def gen_dataset(adj, num_to_add, num_to_delete):
+    size = adj.shape[0]
+    adj = adj.clone()
+    edges = adj.nonzero(as_tuple=False).tolist()
+    non_edges = [(i, j) for i in range(size) for j in range(size) if i != j and adj[i, j] == 0]
 
-        c = sum(P_HG[j].cpu().equal(p_samples[i][j].cpu()) for j in range(P_HG.size(0)))
-        results.append(c / S_emb.shape[0])
+    # Remove edges
+    for _ in range(min(num_to_delete, len(edges))):
+        edge = random.choice(edges)
+        adj[edge[0], edge[1]] = 0
+        adj[edge[1], edge[0]] = 0
+        edges.remove(edge)
 
-    avg = np.average(results)
-    std = np.std(results)
-    return avg, std
+    # Add edges
+    for _ in range(min(num_to_add, len(non_edges))):
+        non_edge = random.choice(non_edges)
+        adj[non_edge[0], non_edge[1]] = 1
+        adj[non_edge[1], non_edge[0]] = 1
+        non_edges.remove(non_edge)
 
-
-def preprocess_graph(adj):
-    adj = coo_matrix(adj)
-    adj_ = adj + coo_matrix(np.eye(adj.shape[0]))
-    rowsum = np.array(adj_.sum(1))
-    degree_mat_inv_sqrt = coo_matrix(np.diag(np.power(rowsum, -0.5).flatten()))
-    return sparse_to_tuple(adj_.dot(degree_mat_inv_sqrt).transpose().dot(degree_mat_inv_sqrt).tocoo())
-
+    return adj
 
 def sparse_to_tuple(sparse_mx):
     if not isinstance(sparse_mx, coo_matrix):
