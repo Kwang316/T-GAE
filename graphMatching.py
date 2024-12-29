@@ -3,8 +3,21 @@ from utils import load_adj, load_features
 import torch
 import torch.nn as nn
 import argparse
+import os
 
-def fit_TGAE(model, adj, features, device, lr, epochs):
+def save_model(model, path):
+    """
+    Save the model state to the specified path.
+
+    Args:
+        model (torch.nn.Module): The model to save.
+        path (str): The file path to save the model.
+    """
+    os.makedirs(os.path.dirname(path), exist_ok=True)  # Ensure the directory exists
+    torch.save(model.state_dict(), path)
+    print(f"Model saved at {path}")
+
+def fit_TGAE(model, adj, features, device, lr, epochs, save_path=None):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     model.to(device)
 
@@ -30,6 +43,10 @@ def fit_TGAE(model, adj, features, device, lr, epochs):
         loss.backward()
         optimizer.step()
 
+    # Save the model if a save path is provided
+    if save_path:
+        save_model(model, save_path)
+
     return model
 
 
@@ -54,8 +71,13 @@ def main(args):
         num_hidden_layers=num_hidden_layers
     )
 
+    if args.load_model:
+        print(f"Loading pre-trained model from {args.load_model}")
+        model.load_state_dict(torch.load(args.load_model, map_location=device))
+        print("Model loaded successfully.")
+
     print("Training model...")
-    model = fit_TGAE(model, adj, features, device, args.lr, args.epochs)
+    model = fit_TGAE(model, adj, features, device, args.lr, args.epochs, args.save_model)
 
     print("Training completed.")
 
@@ -68,6 +90,7 @@ if __name__ == "__main__":
     parser.add_argument('--epochs', type=int, default=10, help="Number of training epochs")
     parser.add_argument('--mapping_only', action='store_true', help="Run in mapping-only mode")
     parser.add_argument('--load_model', type=str, help="Path to the pre-trained model to load")
+    parser.add_argument('--save_model', type=str, help="Path to save the final trained model")
 
     args = parser.parse_args()
     main(args)
