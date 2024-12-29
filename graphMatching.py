@@ -3,14 +3,25 @@ from utils import load_adj, load_features
 import torch
 import torch.nn as nn
 import argparse
+import os
 
-def fit_TGAE(model, adj, features, device, lr, epochs):
+def save_model(model, save_path):
+    """
+    Save the model state to the specified path.
+
+    Args:
+        model (torch.nn.Module): The model to be saved.
+        save_path (str): The file path where the model should be saved.
+    """
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)  # Ensure the directory exists
+    torch.save(model.state_dict(), save_path)
+    print(f"Model saved at {save_path}")
+
+
+def fit_TGAE(model, adj, features, device, lr, epochs, save_path=None):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     model.to(device)
-
-    # Normalize adjacency matrix
-    adj = adj.float().to(device)
-    adj = adj / adj.max()  # Ensure values are in [0, 1]
+    adj = adj.float().to(device)  # Ensure adjacency matrix is in the correct format
     features = features.to(device)
 
     for epoch in range(epochs):
@@ -19,16 +30,19 @@ def fit_TGAE(model, adj, features, device, lr, epochs):
 
         # Forward pass
         reconstructed = model(features, adj)
-        loss = nn.BCEWithLogitsLoss()(reconstructed, adj)
+        reconstructed = torch.sigmoid(reconstructed)  # Ensure values are in [0, 1]
 
-        # Debugging outputs
+        # Compute loss
+        loss = nn.BCELoss()(reconstructed, adj)
         print(f"Epoch {epoch}, Loss: {loss.item()}")
-        print(f"Adjacency min: {adj.min().item()}, max: {adj.max().item()}")
-        print(f"Reconstructed min: {reconstructed.min().item()}, max: {reconstructed.max().item()}")
 
         # Backward pass and optimization
         loss.backward()
         optimizer.step()
+
+    # Save the model if a save path is provided
+    if save_path:
+        save_model(model, save_path)
 
     return model
 
@@ -55,20 +69,18 @@ def main(args):
     )
 
     print("Training model...")
-    model = fit_TGAE(model, adj, features, device, args.lr, args.epochs)
+    save_path = args.save_model_path  # Get save path from arguments
+    model = fit_TGAE(model, adj, features, device, args.lr, args.epochs, save_path)
 
     print("Training completed.")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run TGAE for graph matching")
-    parser.add_argument('--dataset1', type=str, required=True, help="Path to the first dataset (adjacency matrix and features)")
-    parser.add_argument('--dataset2', type=str, required=False, help="Path to the second dataset for mapping (optional)")
+    parser.add_argument('--dataset1', type=str, required=True, help="Path to the dataset (adjacency matrix and features)")
     parser.add_argument('--lr', type=float, default=0.001, help="Learning rate for training")
     parser.add_argument('--epochs', type=int, default=10, help="Number of training epochs")
-    parser.add_argument('--mapping_only', action='store_true', help="Run in mapping-only mode")
-    parser.add_argument('--load_model', type=str, help="Path to the pre-trained model to load")
-
+    parser.add_argument('--save_model_path', type=str, default=None, help="Path to save the trained model")
     args = parser.parse_args()
-    main(args)
 
+    main(args)
