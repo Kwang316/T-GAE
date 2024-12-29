@@ -55,7 +55,7 @@ class TGAE(nn.Module):
 
 def fit_TGAE(model, adj, features, device, lr, epochs):
     adj_dense = adj.to_dense() if adj.is_sparse else adj
-    adj_dense = validate_tensor_range(adj_dense, "adj")
+    adj_dense = validate_tensor_range(adj_dense, "adj")  # Ensure values are within [0, 1]
 
     adj_norm = preprocess_graph(adj).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=5e-4)
@@ -67,7 +67,7 @@ def fit_TGAE(model, adj, features, device, lr, epochs):
 
         embeddings = model(features, adj_norm)
         reconstructed = torch.sigmoid(torch.matmul(embeddings, embeddings.T))
-        reconstructed = validate_tensor_range(reconstructed, "reconstructed")
+        reconstructed = validate_tensor_range(reconstructed, "reconstructed")  # Ensure reconstructed values in [0, 1]
 
         # Ensure shapes match
         assert reconstructed.shape == adj_dense.to(device).shape, \
@@ -78,11 +78,13 @@ def fit_TGAE(model, adj, features, device, lr, epochs):
         loss.backward()
         optimizer.step()
 
+        # Debugging information
         print(f"Epoch {epoch + 1}/{epochs}, Loss: {loss.item()}")
         print(f"Reconstructed min: {reconstructed.min().item()}, max: {reconstructed.max().item()}")
         print(f"Adjacency min: {adj_dense.min().item()}, max: {adj_dense.max().item()}")
 
     return model
+
 
 def compute_mapping(model, adj1, adj2, device):
     adj1 = preprocess_graph(adj1).to(device)
