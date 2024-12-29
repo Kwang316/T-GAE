@@ -1,81 +1,54 @@
-import torch
-from scipy.sparse import coo_matrix, csr_matrix
-import numpy as np
-from tqdm import tqdm
-
 import numpy as np
 import torch
-
-def load_features(filepath):
-    """
-    Load node features from a file.
-
-    Args:
-        filepath (str): Path to the file containing node features.
-
-    Returns:
-        torch.Tensor: Tensor containing node features.
-    """
-    # Example: If features are stored in a numpy file
-    features = np.load(filepath)  # Adjust based on file format
-    return torch.tensor(features, dtype=torch.float32)
+from scipy.sparse import load_npz, csr_matrix
 
 
 def load_adj(filepath):
     """
-    Load adjacency matrix from a .pt file.
+    Load an adjacency matrix from a file.
+
+    Args:
+        filepath (str): Path to the adjacency matrix file.
+
+    Returns:
+        torch.Tensor: Dense adjacency matrix as a PyTorch tensor.
     """
-    print(f"Loading adjacency matrix from {filepath}...")
-    data = torch.load(filepath)
-    if not isinstance(data, dict) or 'adj_matrix' not in data:
-        raise ValueError(f"Unsupported file format or missing 'adj_matrix' key in {filepath}.")
-    adj_matrix = data['adj_matrix']
-    return adj_matrix, data.get('node_mapping', None)
-
-import torch
-import numpy as np
-from scipy.sparse import coo_matrix
-
-def preprocess_graph(adj):
-    """
-    Preprocess the adjacency matrix for TGAE.
-    """
-    print("Preprocessing graph...")
-    
-    # Convert to COO format if necessary
-    if not isinstance(adj, coo_matrix):
-        adj = coo_matrix(adj)
-
-    # Add self-loops
-    adj_ = adj + coo_matrix(np.eye(adj.shape[0]))
-
-    # Normalize the adjacency matrix
-    rowsum = np.array(adj_.sum(1)).flatten()
-    degree_mat_inv_sqrt = np.power(rowsum, -0.5)
-    degree_mat_inv_sqrt[np.isinf(degree_mat_inv_sqrt)] = 0.  # Avoid inf
-    degree_mat_inv_sqrt = np.diag(degree_mat_inv_sqrt)
-    adj_normalized = adj_.dot(degree_mat_inv_sqrt).transpose().dot(degree_mat_inv_sqrt)
-
-    # Check if sparse or dense is needed
-    if torch.cuda.is_available():
-        # Directly use dense tensor on CUDA for speed
-        adj_normalized_tensor = torch.tensor(adj_normalized.toarray(), dtype=torch.float32)
+    if filepath.endswith('.npz'):
+        # Load sparse adjacency matrix
+        adj_sparse = load_npz(filepath)
+        adj_dense = adj_sparse.toarray()  # Convert to dense format
+        return torch.tensor(adj_dense, dtype=torch.float32)
     else:
-        # Convert to sparse COO tensor for CPU
-        adj_normalized = coo_matrix(adj_normalized)
-        indices = torch.tensor([adj_normalized.row, adj_normalized.col], dtype=torch.long)
-        values = torch.tensor(adj_normalized.data, dtype=torch.float32)
-        shape = torch.Size(adj_normalized.shape)
-        adj_normalized_tensor = torch.sparse_coo_tensor(indices, values, shape)
-
-    return adj_normalized_tensor
+        raise ValueError(f"Unsupported file format for {filepath}. Expected .npz.")
 
 
-def save_mapping(mapping, output_file):
+def sparse_to_dense(sparse_adj):
     """
-    Save the computed node mapping to a file.
+    Convert a sparse adjacency matrix to a dense format.
+
+    Args:
+        sparse_adj: Scipy sparse matrix.
+
+    Returns:
+        torch.Tensor: Dense PyTorch tensor.
     """
-    with open(output_file, "w") as f:
-        for i, j in enumerate(mapping):
-            f.write(f"{i} -> {j.item()}\n")
-    print(f"Node mapping saved to {output_file}")
+    dense_adj = sparse_adj.toarray()
+    return torch.tensor(dense_adj, dtype=torch.float32)
+
+
+def preprocess_adj(adj):
+    """
+    Normalize an adjacency matrix.
+
+    Args:
+        adj: Dense adjacency matrix.
+
+    Returns:
+        torch.Tensor: Normalized adjacency matrix.
+    """
+    adj = adj + torch.eye(adj.shape[0])  # Add self-loops
+    row_sum = adj.sum(dim=1)
+    d_inv_sqrt = torch.pow(row_sum, -0.5).flatten()
+    d_inv_sqrt[torch.isinf(d_inv_sqrt)] = 0.0
+    d_mat_inv_sqrt = torch.diag(d_inv_sqrt)
+    return torch.mm(torch.mm(d_mat_inv_sqrt, adj), d_mat_inv_sqrt)
