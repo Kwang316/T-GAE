@@ -109,6 +109,7 @@ def main(args):
 
         model = fit_TGAE(model, adj, features, device, args.lr, args.epochs)
         torch.save(model.state_dict(), "tgae_model.pt")
+        torch.save(model.state_dict(), "/content/drive/My Drive/Neuro/TGAE/tgae_model.pt")
         print("Model saved as tgae_model.pt")
 
 if __name__ == "__main__":
