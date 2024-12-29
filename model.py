@@ -1,34 +1,34 @@
 import torch
 import torch.nn as nn
 
-
-class GINConv(nn.Module):
+class GINConv(torch.nn.Module):
     def __init__(self, input_dim, output_dim):
         super().__init__()
-        self.linear = nn.Linear(input_dim, output_dim)
+        self.linear = torch.nn.Linear(input_dim, output_dim)
 
-    def forward(self, adj, features):
-        return nn.ReLU()(self.linear(features + torch.matmul(adj, features)))
+    def forward(self, A, X):
+        X = self.linear(X + A @ X)
+        X = torch.nn.functional.relu(X)
+        return X
 
-
-class TGAE_Encoder(nn.Module):
-    def __init__(self, input_dim, hidden_dims, output_dim):
+class TGAE_Encoder(torch.nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim, n_layers):
         super().__init__()
-        self.layers = nn.ModuleList([GINConv(input_dim, hidden_dims[0])])
-        for i in range(1, len(hidden_dims)):
-            self.layers.append(GINConv(hidden_dims[i - 1], hidden_dims[i]))
-        self.out_layer = nn.Linear(hidden_dims[-1], output_dim)
+        self.layers = nn.ModuleList()
+        self.layers.append(GINConv(input_dim, hidden_dim[0]))
+        for i in range(1, n_layers - 1):
+            self.layers.append(GINConv(hidden_dim[i - 1], hidden_dim[i]))
+        self.out_proj = nn.Linear(hidden_dim[-1], output_dim)
 
-    def forward(self, adj, features):
+    def forward(self, A, X):
         for layer in self.layers:
-            features = layer(adj, features)
-        return self.out_layer(features)
+            X = layer(A, X)
+        return self.out_proj(X)
 
-
-class TGAE(nn.Module):
-    def __init__(self, hidden_layers, input_dim, hidden_dim, output_dim):
+class TGAE(torch.nn.Module):
+    def __init__(self, num_hidden_layers, input_dim, hidden_dim, output_dim):
         super().__init__()
-        self.encoder = TGAE_Encoder(input_dim, hidden_dim, output_dim)
+        self.encoder = TGAE_Encoder(input_dim, hidden_dim, output_dim, num_hidden_layers)
 
-    def forward(self, features, adj):
-        return self.encoder(adj, features)
+    def forward(self, X, adj):
+        return self.encoder(adj, X)
