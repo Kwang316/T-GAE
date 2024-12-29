@@ -43,9 +43,15 @@ def main(args):
     input_dim = features.shape[1]
     hidden_dim = 16
     output_dim = adj.shape[0]
+    num_hidden_layers = 3  # Set the number of hidden layers (adjust as needed)
 
     # Initialize model
-    model = TGAE(input_dim=input_dim, hidden_dim=hidden_dim, output_dim=output_dim)
+    model = TGAE(
+        input_dim=input_dim,
+        hidden_dim=hidden_dim,
+        output_dim=output_dim,
+        num_hidden_layers=num_hidden_layers
+    )
 
     print("Training model...")
     model = fit_TGAE(model, adj, features, device, args.lr, args.epochs)
