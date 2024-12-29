@@ -1,11 +1,9 @@
-import numpy as np
 import torch
-from scipy.sparse import load_npz, csr_matrix
 
 
 def load_adj(filepath):
     """
-    Load an adjacency matrix from a file.
+    Load an adjacency matrix from a .pt file.
 
     Args:
         filepath (str): Path to the adjacency matrix file.
@@ -13,13 +11,11 @@ def load_adj(filepath):
     Returns:
         torch.Tensor: Dense adjacency matrix as a PyTorch tensor.
     """
-    if filepath.endswith('.npz'):
-        # Load sparse adjacency matrix
-        adj_sparse = load_npz(filepath)
-        adj_dense = adj_sparse.toarray()  # Convert to dense format
-        return torch.tensor(adj_dense, dtype=torch.float32)
-    else:
-        raise ValueError(f"Unsupported file format for {filepath}. Expected .npz.")
+    # Load tensor directly from .pt file
+    adj = torch.load(filepath)
+    if not isinstance(adj, torch.Tensor):
+        raise ValueError(f"File {filepath} does not contain a valid PyTorch tensor.")
+    return adj
 
 
 def sparse_to_dense(sparse_adj):
@@ -27,13 +23,12 @@ def sparse_to_dense(sparse_adj):
     Convert a sparse adjacency matrix to a dense format.
 
     Args:
-        sparse_adj: Scipy sparse matrix.
+        sparse_adj: PyTorch sparse tensor.
 
     Returns:
         torch.Tensor: Dense PyTorch tensor.
     """
-    dense_adj = sparse_adj.toarray()
-    return torch.tensor(dense_adj, dtype=torch.float32)
+    return sparse_adj.to_dense()
 
 
 def preprocess_adj(adj):
