@@ -39,6 +39,7 @@ def fit_TGAE(model, train_loader, device, lr, epochs, level, eval_interval):
         model.train()
         total_loss = 0
 
+        # Loop through datasets and their adjacency lists
         for dataset, adj_list in train_loader.items():
             for adj in adj_list:
                 adj = adj.to(device)
@@ -69,6 +70,7 @@ def fit_TGAE(model, train_loader, device, lr, epochs, level, eval_interval):
 
     print(f"Best Accuracy: {best_avg:.4f} ± {best_std:.4f}")
     return model
+
 
 
 def main(args):
