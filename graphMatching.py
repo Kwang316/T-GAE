@@ -1,5 +1,5 @@
 from model import TGAE  # Import your TGAE model
-from utils import load_adj, load_features  # Ensure these utilities are implemented
+#from utils import load_adj, load_features  # Ensure these utilities are implemented
 import torch
 import torch.nn as nn
 import argparse
