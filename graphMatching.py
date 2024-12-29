@@ -3,16 +3,7 @@ from utils import load_adj, preprocess_graph, save_mapping
 from torch_geometric.nn import GINConv
 import torch.nn as nn
 import argparse
-from scipy.sparse import coo_matrix
 
-def adj_to_edge_index(adj):
-    """
-    Converts a sparse adjacency matrix (COO format) to edge_index format.
-    """
-    if not isinstance(adj, coo_matrix):
-        adj = coo_matrix(adj.cpu().numpy())
-    edge_index = torch.tensor([adj.row, adj.col], dtype=torch.long)
-    return edge_index
 
 class TGAE_Encoder(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, num_hidden_layers):
@@ -36,53 +27,75 @@ class TGAE_Encoder(nn.Module):
         total_hidden_dim = sum(hidden_dim)
         self.out_proj = nn.Linear(total_hidden_dim, output_dim)
 
-    def forward(self, x, edge_index):
+    def forward(self, x, adj):
         x = self.in_proj(x)
         hidden_states = [x]
 
         for conv in self.convs:
-            x = conv(x, edge_index)
+            x = conv(x, adj)
             hidden_states.append(x)
 
         x = torch.cat(hidden_states, dim=1)
         x = self.out_proj(x)
         return x
 
+
 class TGAE(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, num_hidden_layers):
         super(TGAE, self).__init__()
         self.encoder = TGAE_Encoder(input_dim, hidden_dim, output_dim, num_hidden_layers)
 
-    def forward(self, x, edge_index):
-        return self.encoder(x, edge_index)
+    def forward(self, x, adj):
+        return self.encoder(x, adj)
+
+
+def validate_tensor_range(tensor, name, min_val=0, max_val=1):
+    """Validate if all values in the tensor are within the specified range."""
+    if not torch.all((tensor >= min_val) & (tensor <= max_val)):
+        raise ValueError(f"Tensor '{name}' contains values outside the range [{min_val}, {max_val}]")
+
 
 def fit_TGAE(model, adj, features, device, lr, epochs):
-    edge_index = adj_to_edge_index(preprocess_graph(adj)).to(device)
+    adj_dense = adj.to_dense() if adj.is_sparse else adj
+    validate_tensor_range(adj_dense, "adjacency matrix")
+
+    adj_norm = preprocess_graph(adj).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=5e-4)
     features = features.to(device)
 
     for epoch in range(epochs):
         model.train()
         optimizer.zero_grad()
-        embeddings = model(features, edge_index)
+        embeddings = model(features, adj_norm)
+
+        # Compute reconstruction
         reconstructed = torch.sigmoid(torch.matmul(embeddings, embeddings.T))
-        loss = nn.BCELoss()(reconstructed, adj.to(device))
+
+        # Validate reconstructed range
+        validate_tensor_range(reconstructed, "reconstructed adjacency matrix")
+
+        # Compute loss
+        loss = nn.BCELoss()(reconstructed, adj_dense.to(device))
+
+        # Backward pass
         loss.backward()
         optimizer.step()
         print(f"Epoch {epoch + 1}/{epochs}, Loss: {loss.item()}")
 
     return model
 
+
 def compute_mapping(model, adj1, adj2, device):
-    edge_index1 = adj_to_edge_index(preprocess_graph(adj1)).to(device)
-    edge_index2 = adj_to_edge_index(preprocess_graph(adj2)).to(device)
+    adj1 = preprocess_graph(adj1).to(device)
+    adj2 = preprocess_graph(adj2).to(device)
     features1 = torch.ones((adj1.shape[0], 1), device=device)
     features2 = torch.ones((adj2.shape[0], 1), device=device)
 
-    embeddings1 = model(features1, edge_index1)
-    embeddings2 = model(features2, edge_index2)
+    embeddings1 = model(features1, adj1)
+    embeddings2 = model(features2, adj2)
     similarities = torch.matmul(embeddings1, embeddings2.T)
     return torch.argmax(similarities, dim=1)
+
 
 def main(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -121,6 +134,7 @@ def main(args):
         torch.save(model.state_dict(), "tgae_model.pt")
         torch.save(model.state_dict(), "/content/drive/My Drive/Neuro/TGAE/tgae_model.pt")
         print("Model saved as tgae_model.pt")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run TGAE for graph matching task.")
