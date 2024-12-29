@@ -37,10 +37,15 @@ def main(args):
 
     print("Loading dataset...")
     adj = load_adj(args.dataset1)  # Load adjacency matrix
-    features = load_features(args.dataset1)  # Load node features
+    features = load_features(args.dataset1)  # Load features
+
+    # Update dimensions based on dataset
+    input_dim = features.shape[1]
+    hidden_dim = 16
+    output_dim = adj.shape[0]
 
     # Initialize model
-    model = TGAE(encoder_hidden_dims=[32, 16], decoder_hidden_dims=[16, 32])
+    model = TGAE(input_dim=input_dim, hidden_dim=hidden_dim, output_dim=output_dim)
 
     print("Training model...")
     model = fit_TGAE(model, adj, features, device, args.lr, args.epochs)
