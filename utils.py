@@ -1,3 +1,5 @@
+import torch
+
 def load_adj(filepath):
     """
     Load an adjacency matrix from a .pt file.
@@ -10,14 +12,25 @@ def load_adj(filepath):
     """
     data = torch.load(filepath)
     
-    if isinstance(data, dict):
-        if "adj_matrix" in data:
-            return data["adj_matrix"]  # Extract the adjacency matrix
-        else:
-            raise ValueError(f"File {filepath} does not contain 'adj_matrix' key.")
-    
-    elif isinstance(data, torch.Tensor):
-        return data  # Return directly if it's a tensor
-
+    if isinstance(data, dict) and "adj_matrix" in data:
+        return data["adj_matrix"]
     else:
         raise ValueError(f"File {filepath} does not contain a valid adjacency matrix.")
+
+
+def load_features(filepath):
+    """
+    Load node features from a .pt file.
+
+    Args:
+        filepath (str): Path to the file containing features.
+
+    Returns:
+        torch.Tensor: Node features as a PyTorch tensor.
+    """
+    data = torch.load(filepath)
+
+    if isinstance(data, dict) and "features" in data:
+        return data["features"]
+    else:
+        raise ValueError(f"File {filepath} does not contain 'features' key or valid node features.")
