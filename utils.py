@@ -49,6 +49,57 @@ def preprocess_graph(adj):
     return sparse_to_tuple(adj_normalized)
 
 
+def generate_purturbations(device, S, perturbation_level, no_samples, method):
+    purturbated_samples = []
+    if(method == "uniform"):
+        for i in range(no_samples):
+            num_edges = int(torch.count_nonzero(S).item()/2)
+            total_purturbations = int(perturbation_level * num_edges)
+            add_edge = random.randint(0,total_purturbations)
+            delete_edge = total_purturbations - add_edge
+            S, S_prime, S_hat, P = gen_dataset(S.to(device), add_edge, delete_edge)
+            purturbated_samples.append(S_prime)
+    elif(method == "degree"):
+        num_edges = int(torch.count_nonzero(S).item() / 2)
+        total_purturbations = int(perturbation_level * num_edges)
+        S = torch.triu(S, diagonal=0)
+        ones_float = torch.ones((S.shape[0], 1)).type(torch.FloatTensor)
+        ones_long = torch.ones((S.shape[0], 1)).type(torch.LongTensor)
+        ones_int = torch.ones((S.shape[0], 1)).type(torch.IntTensor)
+        try:
+            D = S @ ones_long
+        except:
+            try:
+                D = S @ ones_int
+            except:
+                D = S @ ones_float
+
+        sum = torch.sum(torch.mul(D@D.T,S))
+        edge_index = S.nonzero().t().contiguous()
+        edge_index = np.array(edge_index)
+        prob = []
+        for i in range(edge_index.shape[1]):
+            d1 = edge_index[0,i]
+            d2 = edge_index[1,i]
+            prob.append(D[d1]*D[d2]/sum)
+        prob = np.array(prob,dtype='float64')
+        prob = np.squeeze(prob)
+        for i in range(no_samples):
+            edges_to_remove = np.random.choice(edge_index.shape[1], total_purturbations,False,p=prob)
+            edges_remain = np.setdiff1d(np.array(range(edge_index.shape[1])), edges_to_remove)
+            edges_index = edge_index[:,edges_remain]
+            S_prime = torch.zeros_like(S)
+            for j in range(edges_index.shape[1]):
+                n1 = edges_index[:,j][0]
+                n2 = edges_index[:,j][1]
+                S_prime[n1][n2] = 1
+                S_prime[n2][n1] = 1
+            purturbated_samples.append(S_prime)
+    else:
+        print("Probability model not defined.")
+        exit()
+    return purturbated_samples
+
 def sparse_to_tuple(sparse_mx):
     """Convert sparse matrix to tuple representation."""
     if not sp.isspmatrix_coo(sparse_mx):
