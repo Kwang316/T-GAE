@@ -14,16 +14,44 @@ def load_adj(filepath):
     adj_matrix = data['adj_matrix']
     return adj_matrix, data.get('node_mapping', None)
 
+import torch
+import numpy as np
+from scipy.sparse import coo_matrix
+
 def preprocess_graph(adj):
     """
-    Preprocess adjacency matrix for use in TGAE.
+    Preprocess the adjacency matrix for TGAE.
     """
-    adj = coo_matrix(adj.cpu().numpy())
-    adj_ = adj + np.eye(adj.shape[0])
-    rowsum = np.array(adj_.sum(1))
-    degree_mat_inv_sqrt = np.diag(np.power(rowsum, -0.5).flatten())
+    print("Preprocessing graph...")
+    
+    # Convert to COO format if necessary
+    if not isinstance(adj, coo_matrix):
+        adj = coo_matrix(adj)
+
+    # Add self-loops
+    adj_ = adj + coo_matrix(np.eye(adj.shape[0]))
+
+    # Normalize the adjacency matrix
+    rowsum = np.array(adj_.sum(1)).flatten()
+    degree_mat_inv_sqrt = np.power(rowsum, -0.5)
+    degree_mat_inv_sqrt[np.isinf(degree_mat_inv_sqrt)] = 0.  # Avoid inf
+    degree_mat_inv_sqrt = np.diag(degree_mat_inv_sqrt)
     adj_normalized = adj_.dot(degree_mat_inv_sqrt).transpose().dot(degree_mat_inv_sqrt)
-    return torch.tensor(adj_normalized, dtype=torch.float)
+
+    # Check if sparse or dense is needed
+    if torch.cuda.is_available():
+        # Directly use dense tensor on CUDA for speed
+        adj_normalized_tensor = torch.tensor(adj_normalized.toarray(), dtype=torch.float32)
+    else:
+        # Convert to sparse COO tensor for CPU
+        adj_normalized = coo_matrix(adj_normalized)
+        indices = torch.tensor([adj_normalized.row, adj_normalized.col], dtype=torch.long)
+        values = torch.tensor(adj_normalized.data, dtype=torch.float32)
+        shape = torch.Size(adj_normalized.shape)
+        adj_normalized_tensor = torch.sparse_coo_tensor(indices, values, shape)
+
+    return adj_normalized_tensor
+
 
 def save_mapping(mapping, output_file):
     """
