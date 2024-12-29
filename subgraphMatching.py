@@ -1,186 +1,134 @@
-from graphMatching import *
-from networkx import read_edgelist
-from scipy.io import loadmat
-from model import *
-from utils import *
+from model import TGAE
+from utils import load_adj, load_features
+import torch
+import argparse
+from torch.optim import Adam
+import warnings
 
-def fit_TGAE_subgraph(data, no_samples, GAE, epoch, train_loader, train_features, device, lr, test_pairs):
-    best_hitAtOne = 0
-    best_hitAtFive = 0
-    best_hitAtTen = 0
-    best_hitAtFifty = 0
-    optimizer = Adam(GAE.parameters(), lr=lr,weight_decay=5e-4)
-    for step in tqdm(range(epoch)):
-        loss = 0
-        for dataset in train_loader.keys():
-            S = train_loader[dataset][0]
-            initial_features = train_features[dataset]
-            for i in range(len(train_loader[dataset])):
-                adj_tensor = train_loader[dataset][i]
-                adj = coo_matrix(adj_tensor.numpy())
-                adj_norm = preprocess_graph(adj)
-                pos_weight = float(adj.shape[0] * adj.shape[0] - adj.sum()) / adj.sum()
-                norm = adj.shape[0] * adj.shape[0] / float((adj.shape[0] * adj.shape[0] - adj.sum()) * 2)
+warnings.filterwarnings("ignore")
 
-                adj_label = coo_matrix(S.numpy())
-                adj_label = sparse_to_tuple(adj_label)
 
-                adj_norm = torch.sparse.FloatTensor(torch.LongTensor(adj_norm[0].T),
-                                                    torch.FloatTensor(adj_norm[1]),
-                                                    torch.Size(adj_norm[2])).to(device)
-                adj_label = torch.sparse.FloatTensor(torch.LongTensor(adj_label[0].T),
-                                                    torch.FloatTensor(adj_label[1]),
-                                                    torch.Size(adj_label[2])).to(device)
+def fit_TGAE(model, adj, features, device, lr, epochs, save_model_path):
+    optimizer = Adam(model.parameters(), lr=lr)
+    model.to(device)
+    adj = adj.to(device)
+    features = features.to(device)
 
-                initial_feature = initial_features[i].to(device)
-
-                weight_mask = adj_label.to_dense().view(-1) == 1
-                weight_tensor = torch.ones(weight_mask.size(0))
-                weight_tensor[weight_mask] = pos_weight
-                weight_tensor = weight_tensor.to(device)
-                z = GAE(initial_feature, adj_norm)
-                A_pred = torch.sigmoid(torch.matmul(z,z.t()))
-                loss += norm * F.binary_cross_entropy(A_pred.view(-1), adj_label.to_dense().view(-1),
-                                                           weight=weight_tensor)
+    for epoch in range(epochs):
+        model.train()
         optimizer.zero_grad()
-        loss = loss / no_samples
+
+        # Forward pass
+        embeddings = model(features, adj)
+        reconstruction = torch.sigmoid(torch.matmul(embeddings, embeddings.T))
+        loss = torch.nn.BCELoss()(reconstruction, adj)
+
+        # Backward pass and optimization
         loss.backward()
         optimizer.step()
 
-        keys = list(train_loader.keys())
-        S1 = train_loader[keys[0]][0]
-        S2 = train_loader[keys[1]][0]
-        adj_S1 = coo_matrix(S1.numpy())
-        adj_norm_1 = preprocess_graph(adj_S1)
-        adj_norm_1 = torch.sparse.FloatTensor(torch.LongTensor(adj_norm_1[0].T),
-                                              torch.FloatTensor(adj_norm_1[1]),
-                                              torch.Size(adj_norm_1[2])).to(device)
-        adj_S2 = coo_matrix(S2.numpy())
-        adj_norm_2 = preprocess_graph(adj_S2)
-        adj_norm_2 = torch.sparse.FloatTensor(torch.LongTensor(adj_norm_2[0].T),
-                                              torch.FloatTensor(adj_norm_2[1]),
-                                              torch.Size(adj_norm_2[2])).to(device)
-        if (data == "ACM_DBLP"):
-            S1_feat = train_features["ACM"][0]
-            S2_feat = train_features["DBLP"][0]
-        elif (data == "Douban Online_Offline"):
-            S1_feat = train_features["Online"][0]
-            S2_feat = train_features["Offline"][0]
+        print(f"Epoch {epoch + 1}/{epochs}, Loss: {loss.item()}")
 
-        S1_emb = GAE(S1_feat.to(device), adj_norm_1).detach()
-        S2_emb = GAE(S2_feat.to(device), adj_norm_2).detach()
+    if save_model_path:
+        torch.save(model.state_dict(), save_model_path)
+        print(f"Model saved to {save_model_path}")
 
-        D = torch.cdist(S1_emb, S2_emb, 2)
-        if (data == "ACM_DBLP"):
-            test_idx = test_pairs[:, 0].astype(np.int32)
-            labels = test_pairs[:, 1].astype(np.int32)
-        elif (data == "Douban Online_Offline"):
-            test_idx = test_pairs[0, :].astype(np.int32)
-            labels = test_pairs[1, :].astype(np.int32)
-        hitAtOne = 0
-        hitAtFive = 0
-        hitAtTen = 0
-        hitAtFifty = 0
-        hitAtHundred = 0
-        for i in range(len(test_idx)):
-            dist_list = D[test_idx[i]]
-            sorted_neighbors = torch.argsort(dist_list).cpu()
-            label = labels[i]
-            for j in range(100):
-                if (sorted_neighbors[j].item() == label):
-                    if (j == 0):
-                        hitAtOne += 1
-                        hitAtFive += 1
-                        hitAtTen += 1
-                        hitAtFifty += 1
-                        hitAtHundred += 1
-                        break
-                    elif (j <= 4):
-                        hitAtFive += 1
-                        hitAtTen += 1
-                        hitAtFifty += 1
-                        hitAtHundred += 1
-                        break
-                    elif (j <= 9):
-                        hitAtTen += 1
-                        hitAtFifty += 1
-                        hitAtHundred += 1
-                        break
-                    elif (j <= 49):
-                        hitAtFifty += 1
-                        hitAtHundred += 1
-                        break
-                    elif (j <= 100):
-                        hitAtHundred += 1
-                        break
-        cur_hitAtOne = hitAtOne / len(test_idx)
-        cur_hitAtFive = hitAtFive / len(test_idx)
-        cur_hitAtTen = hitAtTen / len(test_idx)
-        cur_hitAtFifty = hitAtFifty / len(test_idx)
 
-        if(cur_hitAtOne > best_hitAtOne): best_hitAtOne = cur_hitAtOne
-        if (cur_hitAtFive > best_hitAtFive): best_hitAtFive = cur_hitAtFive
-        if (cur_hitAtTen > best_hitAtTen): best_hitAtTen = cur_hitAtTen
-        if (cur_hitAtFifty > best_hitAtFifty): best_hitAtFifty = cur_hitAtFifty
-    print("The best results achieved:")
-    print("Hit@1: ", end="")
-    print(best_hitAtOne)
-    print("Hit@5: ", end="")
-    print(best_hitAtFive)
-    print("Hit@10: ", end="")
-    print(best_hitAtTen)
-    print("Hit@50: ", end="")
-    print(best_hitAtFifty)
+def map_nodes(model, dataset1_adj, dataset1_features, dataset2_adj, dataset2_features, device, save_mapping_path):
+    model.to(device)
+    model.eval()
+
+    dataset1_adj = dataset1_adj.to(device)
+    dataset1_features = dataset1_features.to(device)
+    dataset2_adj = dataset2_adj.to(device)
+    dataset2_features = dataset2_features.to(device)
+
+    # Generate embeddings for both datasets
+    emb1 = model(dataset1_features, dataset1_adj)
+    emb2 = model(dataset2_features, dataset2_adj)
+
+    # Compute pairwise distances
+    distances = torch.cdist(emb1, emb2, p=2)
+
+    # Compute node mapping using Hungarian algorithm
+    from scipy.optimize import linear_sum_assignment
+
+    row_ind, col_ind = linear_sum_assignment(distances.cpu().detach().numpy())
+    mapping = {int(row): int(col) for row, col in zip(row_ind, col_ind)}
+
+    if save_mapping_path:
+        torch.save(mapping, save_mapping_path)
+        print(f"Node mapping saved to {save_mapping_path}")
+
+    return mapping
 
 
 def main(args):
-    data = args.dataset
-    device = torch.device('cuda:0' if torch.cuda.is_available() else "cpu")
-    train_features = {}
-    if (data == "ACM_DBLP"):
-        train_set = ["ACM", "DBLP"]
-        input_dim = 17
-        b = np.load('data/ACM-DBLP.npz')
-        train_features["ACM"] = [torch.from_numpy(b["x1"]).float()]
-        train_features["DBLP"] = [torch.from_numpy(b["x2"]).float()]
-        test_pairs = b['test_pairs'].astype(np.int32)
-        NUM_HIDDEN_LAYERS = 12
-        HIDDEN_DIM = [1024,1024,1024,1024,1024,1024,1024,1024,1024,1024,1024,1024,1024]
-        output_feature_size = 1024
-        lr = 0.0001
-        epoch = 50
-    elif (data == "Douban Online_Offline"):
-        a1, f1, a2, f2, test_pairs = load_douban()
-        f1 = f1.A
-        f2 = f2.A
-        train_set = ["Online", "Offline"]
-        input_dim = 538
-        test_pairs = torch.tensor(np.array(test_pairs, dtype=int)) - 1
-        test_pairs = test_pairs.numpy()
-        train_features["Online"] = [torch.from_numpy(f1).float()]
-        train_features["Offline"] = [torch.from_numpy(f2).float()]
-        NUM_HIDDEN_LAYERS = 6
-        HIDDEN_DIM = [512,512,512,512,512,512,512]
-        output_feature_size = 512
-        lr = 0.0001
-        epoch = 20
-    print("Loading training datasets")
-    train_loader = {}
-    for dataset in train_set:
-        train_loader[dataset] = [load_adj(dataset)]
-    model = TGAE(NUM_HIDDEN_LAYERS,
-                input_dim,
-                HIDDEN_DIM,
-                output_feature_size).to(device)
-    print("Generating training features")
-    print("Fitting model")
-    fit_TGAE_subgraph(data, len(train_set) * (1 + 1), model, epoch, train_loader, train_features, device,
-            lr,test_pairs)
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    if args.mode == "train":
+        print("Loading dataset...")
+        adj = load_adj(args.dataset1)
+        features = load_features(args.dataset1)
+
+        input_dim = features.shape[1]
+        hidden_dim = [16] * 8  # 8 hidden layers
+        output_dim = 16  # Output feature size
+
+        model = TGAE(len(hidden_dim), input_dim, hidden_dim, output_dim)
+
+        print("Training model...")
+        fit_TGAE(
+            model,
+            adj,
+            features,
+            device,
+            args.lr,
+            args.epochs,
+            args.save_model,
+        )
+
+    elif args.mode == "map":
+        if not args.dataset2 or not args.load_model:
+            raise ValueError("Mapping mode requires --dataset2 and --load_model")
+
+        print("Loading datasets...")
+        dataset1_adj = load_adj(args.dataset1)
+        dataset1_features = load_features(args.dataset1)
+        dataset2_adj = load_adj(args.dataset2)
+        dataset2_features = load_features(args.dataset2)
+
+        print("Loading model...")
+        input_dim = dataset1_features.shape[1]
+        hidden_dim = [16] * 8
+        output_dim = 16
+        model = TGAE(len(hidden_dim), input_dim, hidden_dim, output_dim)
+        model.load_state_dict(torch.load(args.load_model))
+
+        print("Mapping nodes...")
+        map_nodes(
+            model,
+            dataset1_adj,
+            dataset1_features,
+            dataset2_adj,
+            dataset2_features,
+            device,
+            args.save_mapping,
+        )
+
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run T-GAE for subgraph matching task")
-    parser.add_argument('--dataset', type=str, default="ACM_DBLP", help='Choose from {ACM_DBLP, Douban Online_Offline}')
+    parser = argparse.ArgumentParser(description="Run T-GAE for graph matching task")
+    parser.add_argument("--mode", type=str, choices=["train", "map"], required=True, help="Mode: train or map")
+    parser.add_argument("--dataset1", type=str, required=True, help="Path to the first dataset")
+    parser.add_argument("--dataset2", type=str, help="Path to the second dataset for mapping")
+    parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
+    parser.add_argument("--epochs", type=int, default=10, help="Number of epochs for training")
+    parser.add_argument("--save_model", type=str, help="Path to save the trained model")
+    parser.add_argument("--load_model", type=str, help="Path to load the trained model")
+    parser.add_argument("--save_mapping", type=str, help="Path to save the node mapping")
     return parser.parse_args()
+
 
 if __name__ == "__main__":
     args = parse_args()
