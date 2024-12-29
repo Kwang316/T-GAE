@@ -4,6 +4,12 @@ from torch_geometric.nn import GINConv
 import torch.nn as nn
 import argparse
 
+# Utility to validate tensor values are in the range [0, 1]
+def validate_tensor_range(tensor, name):
+    if not torch.all((tensor >= 0) & (tensor <= 1)):
+        print(f"Warning: {name} contains values outside the range [0, 1]. Clamping values.")
+        return torch.clamp(tensor, 0, 1)
+    return tensor
 
 class TGAE_Encoder(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, num_hidden_layers):
@@ -18,9 +24,9 @@ class TGAE_Encoder(nn.Module):
             self.convs.append(
                 GINConv(
                     nn.Sequential(
-                        nn.Linear(hidden_dim[i], hidden_dim[i + 1]),
+                        nn.Linear(hidden_dim[i], hidden_dim[i+1]),
                         nn.ReLU(),
-                        nn.Linear(hidden_dim[i + 1], hidden_dim[i + 1])
+                        nn.Linear(hidden_dim[i+1], hidden_dim[i+1])
                     )
                 )
             )
@@ -39,7 +45,6 @@ class TGAE_Encoder(nn.Module):
         x = self.out_proj(x)
         return x
 
-
 class TGAE(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, num_hidden_layers):
         super(TGAE, self).__init__()
@@ -48,19 +53,9 @@ class TGAE(nn.Module):
     def forward(self, x, adj):
         return self.encoder(x, adj)
 
-
-def validate_tensor_range(tensor, name, min_val=0, max_val=1):
-    """Validate if all values in the tensor are within the specified range."""
-    if not torch.all((tensor >= min_val) & (tensor <= max_val)):
-        print(f"Warning: Tensor '{name}' contains values outside the range [{min_val}, {max_val}]")
-        tensor_clamped = torch.clamp(tensor, min=min_val, max=max_val)
-        return tensor_clamped
-    return tensor
-
-
 def fit_TGAE(model, adj, features, device, lr, epochs):
     adj_dense = adj.to_dense() if adj.is_sparse else adj
-    adj_dense = validate_tensor_range(adj_dense, "adjacency matrix")
+    adj_dense = validate_tensor_range(adj_dense, "adj")
 
     adj_norm = preprocess_graph(adj).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=5e-4)
@@ -69,23 +64,25 @@ def fit_TGAE(model, adj, features, device, lr, epochs):
     for epoch in range(epochs):
         model.train()
         optimizer.zero_grad()
-        embeddings = model(features, adj_norm)
 
-        # Compute reconstruction
+        embeddings = model(features, adj_norm)
         reconstructed = torch.sigmoid(torch.matmul(embeddings, embeddings.T))
-        reconstructed = validate_tensor_range(reconstructed, "reconstructed adjacency matrix")
+        reconstructed = validate_tensor_range(reconstructed, "reconstructed")
+
+        # Ensure shapes match
+        assert reconstructed.shape == adj_dense.to(device).shape, \
+            f"Shape mismatch: reconstructed {reconstructed.shape} vs adj {adj_dense.shape}"
 
         # Compute loss
         loss = nn.BCELoss()(reconstructed, adj_dense.to(device))
-
-        # Backward pass
         loss.backward()
         optimizer.step()
+
         print(f"Epoch {epoch + 1}/{epochs}, Loss: {loss.item()}")
+        print(f"Reconstructed min: {reconstructed.min().item()}, max: {reconstructed.max().item()}")
+        print(f"Adjacency min: {adj_dense.min().item()}, max: {adj_dense.max().item()}")
 
     return model
-
-
 
 def compute_mapping(model, adj1, adj2, device):
     adj1 = preprocess_graph(adj1).to(device)
@@ -97,7 +94,6 @@ def compute_mapping(model, adj1, adj2, device):
     embeddings2 = model(features2, adj2)
     similarities = torch.matmul(embeddings1, embeddings2.T)
     return torch.argmax(similarities, dim=1)
-
 
 def main(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -136,7 +132,6 @@ def main(args):
         torch.save(model.state_dict(), "tgae_model.pt")
         torch.save(model.state_dict(), "/content/drive/My Drive/Neuro/TGAE/tgae_model.pt")
         print("Model saved as tgae_model.pt")
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run TGAE for graph matching task.")
