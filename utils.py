@@ -1,14 +1,18 @@
 import torch
-import numpy as np
-import scipy.sparse as sp
-from netrd.distance import netsimile
-import networkx as nx
+import os
 
 
 def load_adj(dataset_path):
-    """Load adjacency matrix."""
-    adj = torch.load(dataset_path)
-    return adj
+    if not os.path.exists(dataset_path):
+        raise FileNotFoundError(f"Dataset not found: {dataset_path}")
+    return torch.load(dataset_path)
+
+
+def load_features(dataset_path):
+    # Assuming features are stored as part of the dataset
+    data = torch.load(dataset_path)
+    return data["features"]
+
 
 
 def test_matching(TGAE, S_hat_samples, p_samples, S_hat_features, S_emb, device, algorithm, metric):
