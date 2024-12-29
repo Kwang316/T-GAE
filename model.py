@@ -16,15 +16,18 @@ class GINConv(torch.nn.Module):
 		return X
 
 
-class TGAE_Encoder(torch.nn.Module):
-	def __init__(self, input_dim, hidden_dim, output_dim, n_layers):
-		super().__init__()
-		hidden_layers = n_layers-2
-		self.in_proj = torch.nn.Linear(input_dim, hidden_dim[0])
-		self.convs = torch.nn.ModuleList()
-		for i in range(hidden_layers):
-			self.convs.append(GINConv(input_dim+hidden_dim[i], hidden_dim[i+1]))
-		self.out_proj = torch.nn.Linear(sum(hidden_dim), output_dim)
+class TGAE_Encoder(nn.Module):
+        def __init__(self, input_dim, hidden_dim, output_dim, num_hidden_layers):
+	        super(TGAE_Encoder, self).__init__()
+	        if isinstance(hidden_dim, int):
+	            hidden_dim = [hidden_dim] * num_hidden_layers  # Repeat the same size for all layers
+	
+	        self.in_proj = torch.nn.Linear(input_dim, hidden_dim[0])
+	        self.hidden_layers = nn.ModuleList([
+	            torch.nn.Linear(hidden_dim[i], hidden_dim[i + 1]) for i in range(len(hidden_dim) - 1)
+	        ])
+	        self.out_proj = torch.nn.Linear(hidden_dim[-1], output_dim)
+
 
 	def forward(self, A, X):
 		initial_X = torch.empty_like(X).copy_(X)
