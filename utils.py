@@ -3,6 +3,24 @@ from scipy.sparse import coo_matrix, csr_matrix
 import numpy as np
 from tqdm import tqdm
 
+import numpy as np
+import torch
+
+def load_features(filepath):
+    """
+    Load node features from a file.
+
+    Args:
+        filepath (str): Path to the file containing node features.
+
+    Returns:
+        torch.Tensor: Tensor containing node features.
+    """
+    # Example: If features are stored in a numpy file
+    features = np.load(filepath)  # Adjust based on file format
+    return torch.tensor(features, dtype=torch.float32)
+
+
 def load_adj(filepath):
     """
     Load adjacency matrix from a .pt file.
