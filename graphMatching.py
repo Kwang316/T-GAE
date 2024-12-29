@@ -62,9 +62,13 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run TGAE for graph matching")
-    parser.add_argument('--dataset1', type=str, required=True, help="Path to the dataset (adjacency matrix and features)")
+    parser.add_argument('--dataset1', type=str, required=True, help="Path to the first dataset (adjacency matrix and features)")
+    parser.add_argument('--dataset2', type=str, required=False, help="Path to the second dataset for mapping (optional)")
     parser.add_argument('--lr', type=float, default=0.001, help="Learning rate for training")
     parser.add_argument('--epochs', type=int, default=10, help="Number of training epochs")
-    args = parser.parse_args()
+    parser.add_argument('--mapping_only', action='store_true', help="Run in mapping-only mode")
+    parser.add_argument('--load_model', type=str, help="Path to the pre-trained model to load")
 
+    args = parser.parse_args()
     main(args)
+
