@@ -22,7 +22,7 @@ def fit_TGAE(model, adj, features, device, lr, epochs):
     """
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     model.to(device)
-    adj = (adj > 0).float().to(device)  # Ensure binary adjacency matrix
+    adj = adj.float().to(device)  # Ensure adjacency matrix is in the correct format
     features = features.to(device)
 
     for epoch in range(epochs):
