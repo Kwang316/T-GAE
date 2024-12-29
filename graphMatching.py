@@ -52,12 +52,15 @@ class TGAE(nn.Module):
 def validate_tensor_range(tensor, name, min_val=0, max_val=1):
     """Validate if all values in the tensor are within the specified range."""
     if not torch.all((tensor >= min_val) & (tensor <= max_val)):
-        raise ValueError(f"Tensor '{name}' contains values outside the range [{min_val}, {max_val}]")
+        print(f"Warning: Tensor '{name}' contains values outside the range [{min_val}, {max_val}]")
+        tensor_clamped = torch.clamp(tensor, min=min_val, max=max_val)
+        return tensor_clamped
+    return tensor
 
 
 def fit_TGAE(model, adj, features, device, lr, epochs):
     adj_dense = adj.to_dense() if adj.is_sparse else adj
-    validate_tensor_range(adj_dense, "adjacency matrix")
+    adj_dense = validate_tensor_range(adj_dense, "adjacency matrix")
 
     adj_norm = preprocess_graph(adj).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=5e-4)
@@ -70,9 +73,7 @@ def fit_TGAE(model, adj, features, device, lr, epochs):
 
         # Compute reconstruction
         reconstructed = torch.sigmoid(torch.matmul(embeddings, embeddings.T))
-
-        # Validate reconstructed range
-        validate_tensor_range(reconstructed, "reconstructed adjacency matrix")
+        reconstructed = validate_tensor_range(reconstructed, "reconstructed adjacency matrix")
 
         # Compute loss
         loss = nn.BCELoss()(reconstructed, adj_dense.to(device))
@@ -83,6 +84,7 @@ def fit_TGAE(model, adj, features, device, lr, epochs):
         print(f"Epoch {epoch + 1}/{epochs}, Loss: {loss.item()}")
 
     return model
+
 
 
 def compute_mapping(model, adj1, adj2, device):
