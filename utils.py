@@ -19,29 +19,22 @@ def preprocess_graph(adj):
     Preprocess adjacency matrix for use in TGAE.
     """
     print("Preprocessing graph...")
-    # Convert adjacency matrix to COO format if necessary
-    if not isinstance(adj, coo_matrix):
-        adj = coo_matrix(adj.cpu().numpy())
-    
-    # Add self-loops
-    adj_ = adj + coo_matrix(np.eye(adj.shape[0]))
-    
-    # Compute the degree matrix
-    rowsum = np.array(adj_.sum(1)).flatten()
-    degree_mat_inv_sqrt = np.power(rowsum, -0.5)
-    degree_mat_inv_sqrt[np.isinf(degree_mat_inv_sqrt)] = 0.0
-    degree_mat_inv_sqrt = coo_matrix(np.diag(degree_mat_inv_sqrt))
-    
-    # Normalize the adjacency matrix
-    adj_normalized = degree_mat_inv_sqrt @ adj_ @ degree_mat_inv_sqrt
+    adj = coo_matrix(adj.cpu().numpy())
+    adj_ = adj + np.eye(adj.shape[0])
+    rowsum = np.array(adj_.sum(1))
 
-    # Convert to PyTorch sparse tensor
-    adj_normalized = coo_matrix(adj_normalized)
-    indices = torch.tensor(np.vstack((adj_normalized.row, adj_normalized.col)), dtype=torch.long)
-    values = torch.tensor(adj_normalized.data, dtype=torch.float)
-    shape = adj_normalized.shape
-    
-    return torch.sparse_coo_tensor(indices, values, torch.Size(shape))
+    degree_mat_inv_sqrt = np.diag(np.power(rowsum, -0.5).flatten())
+    adj_normalized = adj_.dot(degree_mat_inv_sqrt).transpose().dot(degree_mat_inv_sqrt)
+
+    # Add tqdm for preprocessing steps
+    with tqdm(total=3, desc="Preprocessing steps") as pbar:
+        adj_normalized = torch.tensor(adj_normalized, dtype=torch.float)
+        pbar.update(1)  # Step 1 completed
+        adj_normalized = adj_normalized.coalesce()  # Step 2: Ensure sparse format
+        pbar.update(1)  # Step 2 completed
+        # Return preprocessed tensor
+        pbar.update(1)  # Step 3 completed
+    return adj_normalized
 
 
 def save_mapping(mapping, output_file):
