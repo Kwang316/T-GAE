@@ -1,143 +1,92 @@
-from utils import load_adj, generate_purturbations, test_matching
-from model import TGAE
+from algorithm import *
+from model import *
 import torch
 import argparse
-import os
+from utils import load_adj, generate_purturbations, test_matching
 from torch.optim import Adam
-from tqdm import tqdm
+import warnings
+warnings.filterwarnings("ignore")
 
 
-def fit_TGAE(model, adj, features, device, lr, epochs, save_path=None):
-    optimizer = Adam(model.parameters(), lr=lr)
-    model.to(device)
-
-    adj = adj.float().to(device)
-    features = features.to(device)
+def fit_TGAE(model, train_loader, features, device, lr, epochs, level, eval_interval):
+    optimizer = Adam(model.parameters(), lr=lr, weight_decay=5e-4)
+    best_avg, best_std = 0, 0
 
     for epoch in range(epochs):
         model.train()
-        optimizer.zero_grad()
-
-        # Forward pass
-        z = model(features, adj)
-        A_pred = torch.sigmoid(torch.matmul(z, z.T))
-
-        # Compute loss
-        pos_weight = (adj.shape[0] * adj.shape[0] - adj.sum()) / adj.sum()
-        weight_tensor = torch.ones_like(adj)
-        weight_tensor[adj == 1] = pos_weight
-        loss = torch.nn.BCELoss(weight=weight_tensor)(A_pred.view(-1), adj.view(-1))
-
-        # Backward pass
-        loss.backward()
-        optimizer.step()
-
-        print(f"Epoch {epoch + 1}/{epochs}, Loss: {loss.item()}")
-
-    if save_path:
-        torch.save(model.state_dict(), save_path)
-        print(f"Model saved to {save_path}")
-
-    return model
-
-
-def map_embeddings(model, dataset1, dataset2, device, algorithm="greedy"):
-    adj1 = load_adj(dataset1).to(device)
-    adj2 = load_adj(dataset2).to(device)
-    features1 = torch.eye(adj1.shape[0]).to(device)
-    features2 = torch.eye(adj2.shape[0]).to(device)
-
-    model.eval()
-    z1 = model(features1, adj1).detach()
-    z2 = model(features2, adj2).detach()
-
-    D = torch.cdist(z1, z2, p=2)
-    mapping = test_matching(model, [adj1], [D], [features1], z2, device, algorithm, "accuracy")
-    print(f"Mapping results: {mapping}")
-
-def main(args):
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-
-    if args.mode == 'train':
-        # Load dataset
-        print("Loading dataset...")
-        adj = load_adj(args.dataset1).to(device)
-
-        # Model parameters
-        input_dim = adj.shape[1]
-        hidden_dim = [16, 16, 16, 16]
-        output_dim = 16
-
-        model = TGAE(len(hidden_dim), input_dim, hidden_dim, output_dim).to(device)
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-
-        # Training loop
-        for epoch in range(args.epochs):
-            model.train()
+        total_loss = 0
+        for adj, feature in zip(train_loader, features):
+            adj = adj.to(device)
+            feature = feature.to(device)
             optimizer.zero_grad()
 
             # Forward pass
-            reconstructed = model(adj, adj)
-            loss = torch.nn.functional.binary_cross_entropy_with_logits(reconstructed, adj)
+            z = model(feature, adj)
+            A_pred = torch.sigmoid(torch.matmul(z, z.t()))
+            loss = torch.nn.BCELoss()(A_pred, adj.to_dense())
 
             # Backward pass
             loss.backward()
             optimizer.step()
+            total_loss += loss.item()
 
-            # Evaluation
-            if epoch % args.eval_interval == 0:
-                print(f"Epoch {epoch}, Loss: {loss.item()}")
+        print(f"Epoch {epoch + 1}/{epochs}, Loss: {total_loss:.4f}")
 
-        # Save the model
-        if args.save_model:
-            torch.save(model.state_dict(), args.save_model)
-            print(f"Model saved to {args.save_model}")
+        if epoch % eval_interval == 0:
+            print(f"Evaluating at level {level}")
+            avg, std = test_matching(model, train_loader, level, device, "greedy", "accuracy")
+            if avg > best_avg:
+                best_avg, best_std = avg, std
+                print(f"New best result: {best_avg:.4f} ± {best_std:.4f}")
 
-    elif args.mode == 'map':
-        # Load datasets and pre-trained model
-        print("Loading datasets...")
-        adj1 = load_adj(args.dataset1).to(device)
-        adj2 = load_adj(args.dataset2).to(device)
 
-        print("Loading model...")
-        model = TGAE(len(args.hidden_dim), adj1.shape[1], args.hidden_dim, 16).to(device)
+def map_datasets(model, adj1, adj2, features1, features2, device, algorithm):
+    model.eval()
+    adj1 = adj1.to(device)
+    adj2 = adj2.to(device)
+    features1 = features1.to(device)
+    features2 = features2.to(device)
+
+    z1 = model(features1, adj1)
+    z2 = model(features2, adj2)
+
+    print(f"Mapping nodes using {algorithm}")
+    return test_matching(z1, z2, algorithm)
+
+
+def main(args):
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    if args.mode == "train":
+        adj = load_adj(args.dataset1)
+        features = generate_purturbations(device, adj, args.level, 10, args.model)
+        model = TGAE(args.hidden_layers, args.input_dim, args.hidden_dim, args.output_dim).to(device)
+        fit_TGAE(model, [adj], [features], device, args.lr, args.epochs, args.level, args.eval_interval)
+        torch.save(model.state_dict(), args.save_model)
+        print(f"Model saved to {args.save_model}")
+    elif args.mode == "map":
+        adj1, adj2 = load_adj(args.dataset1), load_adj(args.dataset2)
+        features1, features2 = generate_features(adj1), generate_features(adj2)
+        model = TGAE(args.hidden_layers, args.input_dim, args.hidden_dim, args.output_dim).to(device)
         model.load_state_dict(torch.load(args.load_model))
-        model.eval()
-
-        # Map nodes
-        print("Mapping nodes...")
-        embeddings1 = model(adj1, adj1).detach()
-        embeddings2 = model(adj2, adj2).detach()
-
-        # Perform node matching
-        print("Calculating node matching...")
-        if args.algorithm == 'greedy':
-            mapping = greedy_hungarian(torch.cdist(embeddings1, embeddings2))
-        elif args.algorithm == 'exact':
-            mapping = hungarian(torch.cdist(embeddings1, embeddings2))
-        else:
-            raise ValueError(f"Unknown algorithm: {args.algorithm}")
-
-        print("Node mapping completed!")
-        if args.save_mapping:
-            torch.save(mapping, args.save_mapping)
-            print(f"Node mapping saved to {args.save_mapping}")
+        mapping = map_datasets(model, adj1, adj2, features1, features2, device, args.algorithm)
+        with open(args.save_mapping, 'w') as f:
+            f.write('\n'.join([f"{src}->{tgt}" for src, tgt in mapping]))
+        print(f"Mapping saved to {args.save_mapping}")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run TGAE for graph matching task")
-    parser.add_argument('--mode', type=str, required=True, choices=['train', 'map'], help="Mode: train or map")
-    parser.add_argument('--dataset1', type=str, required=True, help="Path to the first dataset (adjacency matrix)")
-    parser.add_argument('--dataset2', type=str, help="Path to the second dataset (for mapping)")
+    parser = argparse.ArgumentParser(description="Run T-GAE for graph matching task")
+    parser.add_argument('--mode', type=str, choices=['train', 'map'], required=True, help="Mode: train or map")
+    parser.add_argument('--dataset1', type=str, required=True, help="Path to the first dataset")
+    parser.add_argument('--dataset2', type=str, help="Path to the second dataset for mapping")
     parser.add_argument('--lr', type=float, default=0.001, help="Learning rate")
     parser.add_argument('--epochs', type=int, default=10, help="Number of training epochs")
-    parser.add_argument('--eval_interval', type=int, default=5, help="Evaluation interval during training")
+    parser.add_argument('--level', type=float, default=0.0, help="Perturbation level for training")
+    parser.add_argument('--model', type=str, default="uniform", choices=["uniform", "degree"], help="Perturbation method")
+    parser.add_argument('--algorithm', type=str, default="greedy", choices=["greedy", "exact", "approxNN"], help="Mapping algorithm")
+    parser.add_argument('--eval_interval', type=int, default=1, help="Evaluation interval")
     parser.add_argument('--save_model', type=str, help="Path to save the trained model")
-    parser.add_argument('--load_model', type=str, help="Path to the pre-trained model")
-    parser.add_argument('--save_mapping', type=str, help="Path to save the node mapping")
-    parser.add_argument('--model', type=str, default='uniform', choices=['uniform', 'degree'], help="Perturbation model")
-    parser.add_argument('--algorithm', type=str, default='greedy', choices=['greedy', 'exact'], help="Matching algorithm")
-
+    parser.add_argument('--load_model', type=str, help="Path to load a pre-trained model")
+    parser.add_argument('--save_mapping', type=str, help="Path to save the mapping result")
     args = parser.parse_args()
     main(args)
-
