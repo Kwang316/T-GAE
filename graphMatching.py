@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 import argparse
 
-
 def fit_TGAE(model, adj, features, device, lr, epochs):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     model.to(device)
@@ -17,9 +16,11 @@ def fit_TGAE(model, adj, features, device, lr, epochs):
 
         # Forward pass
         reconstructed = model(features, adj)
+        reconstructed = torch.sigmoid(reconstructed)  # Ensure values are in [0, 1]
 
-        # Ensure reconstructed values are in [0, 1]
-        reconstructed = torch.sigmoid(reconstructed)
+        # Debugging outputs
+        print(f"Reconstructed min: {reconstructed.min()}, max: {reconstructed.max()}")
+        print(f"Adjacency matrix min: {adj.min()}, max: {adj.max()}")
 
         # Compute loss
         loss = nn.BCELoss()(reconstructed, adj)
